@@ -1277,12 +1277,16 @@ export class PiPedalModel //implements PiPedalModel
         // reload state, but not configuration.
         this.clientId = await this.getWebSocket().request<number>("hello");
 
-        let newServerVersion = this.serverVersion = await this.getWebSocket().request<PiPedalVersion>("version");
-        if (newServerVersion.serverVersion !== this.serverVersion.serverVersion) {
+        const previousServerVersion = this.serverVersion;
+        const newServerVersion = await this.getWebSocket().request<PiPedalVersion>("version");
+        // Compare before replacing the version retained by this client.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+        if (previousServerVersion && newServerVersion.serverVersion !== previousServerVersion.serverVersion) {
             this.reloadPage();
             return;
         }
 
+        this.serverVersion = newServerVersion;
         // anything could have changed while we were disconnected.
         await this.loadServerState();
     }
@@ -2616,6 +2620,10 @@ export class PiPedalModel //implements PiPedalModel
 
                     }
                 }
+            }).catch(() => {
+                // A disconnected socket rejects pending subscriptions. Reconnection
+                // rebuilds them; do not leave the derived promise unhandled.
+                // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
             });
         return result;
 

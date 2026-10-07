@@ -162,7 +162,13 @@ fs::path ServiceFile() {
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [DES-SEC] [3.12] */
 Tone3000DefaultsStore::Tone3000DefaultsStore(const fs::path& dataRoot,const std::vector<std::string>& appRoots):dataRoot(dataRoot),serviceFile(ServiceFile()) {
     if(appRoots.size()>8) throw PiPedalArgumentException("Too many app preset roots.");
-    for(const auto& root:appRoots) {fs::path path(root);CheckPath(path);appFiles.push_back(path.parent_path()/"preferences.settings");}
+    for(const auto& root:appRoots) {
+        fs::path path(root);
+        if(!path.is_absolute() || path.lexically_normal()!=path)
+            throw PiPedalArgumentException("Settings path is not normalized.");
+        appSourceRoots.push_back(path);
+        appFiles.push_back(path.parent_path()/"preferences.settings");
+    }
 }
 Tone3000DefaultsStore::Tone3000DefaultsStore(const fs::path& dataRoot,const fs::path& serviceFile,std::vector<fs::path> appFiles):dataRoot(dataRoot),serviceFile(serviceFile),appFiles(std::move(appFiles)) {}
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
@@ -174,8 +180,13 @@ void Tone3000DefaultsStore::Validate(const Tone3000ProcessingDefaults& d) {
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [DES-OPERATE] [3.12] */
 Tone3000DefaultsResult Tone3000DefaultsStore::Get() const try {
     Tone3000DefaultsResult result;
-    for(const auto& file:appFiles) try {
-        auto bytes=Read(file);if(!bytes) continue;auto doc=Parse(*bytes);result.appDefaults_=Processing(Values(doc.get()));break;
+    // Optional app references must never prevent reading the authoritative
+    // service profile. Recheck both configured roots and preference paths so
+    // linked/unavailable sources stay excluded rather than silently trusted.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+    for(size_t i=0;i<appFiles.size();++i) try {
+        if(i<appSourceRoots.size()) CheckPath(appSourceRoots[i]);
+        auto bytes=Read(appFiles[i]);if(!bytes) continue;auto doc=Parse(*bytes);result.appDefaults_=Processing(Values(doc.get()));break;
     } catch(const std::exception&) {result.warnings_.push_back("T3K app defaults are unavailable or unsupported.");}
     auto bytes=Read(serviceFile);std::map<std::string,std::string> values;
     if(bytes) {auto doc=Parse(*bytes);values=Values(doc.get());}

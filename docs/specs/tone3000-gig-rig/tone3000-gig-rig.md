@@ -3,9 +3,9 @@ afx: true
 type: SPRINT
 status: Approved
 owner: "@rixrix"
-version: "1.8"
+version: "1.9"
 created_at: "2026-10-03T23:59:54.000Z"
-updated_at: "2026-10-05T10:48:36.000Z"
+updated_at: "2026-10-07T10:17:25.000Z"
 tags: ["tone3000-gig-rig", "sprint", "raspberry-pi", "lv2"]
 approval:
   spec: Approved
@@ -861,6 +861,32 @@ Corrected only the persisted global input channel to `midiChannel: 0` through th
 
 Rix then chose a diagnostic power cycle with Jogg powered and connected before the Pi. New boot ID `71bffe56-b0d2-4f78-9cfd-8eb99827622c` shows USB Jogg at approximately 2.615 seconds, `Found ALSA device hw:Audio` at 7.148 seconds and the **first** audio start on Jogg at 8.164 seconds, without a null-device fallback or later audio-thread restart in the inspected boot log. ALSA playback/capture both report RUNNING under daemon PID 977; status reports active with no error or restart, and automatic service restart count is zero. The enabled T3K host on clean saved **Rx - Stereo Fuzz - Drop** and persisted channel-1 SINCO input survive this power cycle. One startup underrun/recovery appears in the log; status initially reported one and later zero, with counter-reset semantics not investigated, so no zero-xrun claim is made. The 8.164-second measurement is driver-start timing, not measured audible readiness. Asked Rix to confirm sound without Apply; listening confirmation is pending at this record. No source, services, device configuration, rig or startup behaviour was changed by the agent for either observation. Powering the interface first demonstrates an early-device startup path; automatic late-device recovery remains an unresolved implementation issue. [5.2] and combined offline/phone/boot acceptance remain open.
 
+### [DES-RECOVERY] Local Regression Corrections and v0.0.12 Candidate
+
+**Authorization — 2026-10-07T10:01:54.000Z:** Rix approved proceeding with the reviewed recovery corrections while keeping new work unstaged. The previous staged binary diff and raw index are preserved; no device access or deployment is included while the Pi is off. Design and task approval are renewed under that explicit instruction and the existing delegated approval; all sections remain Approved. Existing human/audio gates remain open.
+
+**Observation versus persistence.** Ordinary current-board reads must return the retained accepted board even when a T3K capture is pending or its effect/audio graph is unavailable, allowing browser startup/reconnect and recovery controls. Capture can refresh the cache only when validated; save/export and explicit editable T3K state retain their actual-state guards. Never replace accepted state with temporary/default plugin state. Qualification tools should use the ordinary board for recovery and explicit current-state requests for confirmation.
+
+**Connection interruption.** Reject outstanding socket requests on disconnect/dispose, ignore replies/events from an old transport, and cancel pending retry/connection work. T3K panels invalidate action/read generations, release busy guards, and reconcile read-only metadata/current state after Ready. Report that an interrupted mutation may have completed; never replay Add/Update/Load/Apply/default saves automatically. Preserve draft conflict checks and source/target revision guards. Audit ignored and chained socket promises so rejection cannot introduce unhandled errors.
+
+**Optional authoring defaults.** Keep configured-root syntax/count bounds. Filesystem rejection of an optional app root must produce a warning inside the optional read path, without preventing authoritative valid service profiles. Validate the original Presets root and settings path on every read; do not follow symlinks or weaken mandatory service settings validation.
+
+**Static resource recovery.** Adapt the bounded upstream invalid-static-GET correction; safely return NotFound when metadata/opening fails, including a disappearing gzip resource. Do not merge development MIDI-bank or kernel-scheduler changes.
+
+**Conditional native-MIDI race.** The review reproduced owner-edit suppression before initial intended state observation using extracted production methods. Restore notifications and MIDI edits have no reliable origin token in the current callback. Do not simply clear a mismatched intent or classify every restore notification as an edit: either can overwrite accepted state or dirty clean loads. Retain exact save guards and qualify a bounded origin/restore-completion correction before enabling native mappings; the already verified Chocolate host Program Change path is separate. This conditional investigation stays explicit and does not block the ordinary-board/socket/defaults fixes.
+
+**Upstream candidate.** T3K v0.0.12 is pinned at `ab5e5ae4388753184687d67816815aa481f2cea9`; JUCE stays 9.0.3 and still requires our hash-checked readback patch. The 43 parameter registrations, schema and eight factory presets are unchanged. New EQ chain-rate and IR partition/shrink corrections are candidates; saved presets already had the correct EQ prepare path. No codec rewrite or automatic runtime alignment is implied. Mac isolated source DSP tests passed 244/244 plus three extended 16-frame/4× checks. Actual Linux ARM64 LV2 build/readback, full-rig audio, restart, long-run xruns and rollback qualification remain required before deployment. Stable PiPedal main matches our base; the unreleased CC32 patch has a wrong controller-byte check and is excluded.
+
+**Owner observation.** Rix reports headless 16 frames × 4 buffers, calibrated, with 4× oversampling working. No independently measured latency or sustained xrun verdict is inferred. Late-Jogg startup recovery, Auto Balance/Auto Align and the existing physical rehearsal gates remain separate work.
+
+**Local execution evidence — 2026-10-07T10:17:25.000Z.** Implemented the ordinary-board recovery path in `PiPedalModel`, retaining strict capture for persistence and explicit editable state. Socket loss now rejects outstanding requests, cancels obsolete transport work and ignores late replies; Library/Rig panels invalidate interrupted operations and reconcile through reads after reconnect without replaying mutations. Reopening the Library releases obsolete busy state. Reconnect compares the previous server version before publishing the new one. Optional app-root filesystem failures now warn without hiding valid authoritative service profiles; root/path bounds and per-read validation remain enforced. Static plain/gzip metadata and open failures return NotFound, with gzip encoding published only after a successful open.
+
+Verification: 91 Python tooling tests pass, including compiled production recovery methods and qualification checks that require explicit confirmed plugin capture rather than a retained board. The candidate frontend passes 29 tests exercising the actual socket, panel handlers and reconnect method; its TypeScript/production build passes. Native defaults checks pass 76 assertions across three cases under AddressSanitizer/UndefinedBehaviorSanitizer. Extracted production static metadata branches plus an opening/response adapter pass 15 assertions under the same sanitizers. The added full HTTP regression fixture has not run on this Mac; full Linux host/HTTP, browser E2E and audio qualification remain pending. Existing isolated codec/source DSP results above are compatibility evidence, not a deployed v0.0.12 build. No T3K bundle, running Pi, preset, or service was updated.
+
+The original staged binary-diff SHA-256 remains `e8e697171db60f17558dbe28d9fdd5a9742a975ef5204daac8971ae48e63b436` and raw index SHA-256 remains `5f89ac1bcb1c161b9f3abe9a6202d3a688cb5264df17b4472987bbbf57b3309f`; new code, tests and this record are working-tree edits only. Test/build outputs are isolated outside the source tree.
+
+**Shared preset check.** Read-only validation of `/Users/rix/Downloads/t3k-presets` accepted `DUAL_BADLANDER_FB.t3kpreset`, `DUAL_MARK_IIC+_FB.t3kpreset` and `RHY_MARK_IV_SM_FB.t3kpreset` through the actual native user-import Inspect/BuildState/SummarizeState path under sanitizers. They contain respectively six, four and two embedded models; the DUAL rigs are stereo and the rhythm rig is mono. Use Library → Upload presets → Add → Load; separate NAM/IR transfers are unnecessary for these complete files. No upload was performed while the Pi was off. Their audibility, levels and processing load still need actual-device qualification.
+
 ### [DES-FILES] Implementation Outputs
 
 | Path / artifact                                                                           | Purpose                                                                                                                                        |
@@ -1232,6 +1258,16 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 - [x] Agent: prepend the ordinary TONE3000 parent marker, verify marker/block selection, stock inline mono/stereo connectors, build and publish the static frontend without changing the owner rig.
 - [ ] Human: confirm the internal chain presentation is clear on the actual phone/device.
 
+#### [3.16] Correct browser recovery and qualify the upstream candidate (Agent + Rix)
+
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-12] [FR-13] [NFR-6] [DES-RECOVERY] [DES-STATE] [DES-SEC] [DES-ROLLOUT] -->
+
+- [x] Agent: preserve the existing staged diff/index; implement ordinary-board recovery, socket/panel interruption reconciliation, optional app-default fallback and bounded static-GET recovery as unstaged edits.
+- [x] Agent: run focused unavailable-capture, connection-loss/late-reply, service-profile/invalid-app-reference and static metadata tests; retain strict save/export/edit guards, revision protection and no automatic mutation replay.
+- [x] Agent: record source/build/readback patch compatibility for pinned T3K v0.0.12 and local diagnostics; explicitly retain Linux ARM64 and powered-device qualification as pending.
+- [ ] Agent + Human: qualify real host readback, authored imports, offline save/recall, phone reconnect, four-PC recall, cold boot/USB timing and sustained actual buffer/oversampling settings before updating the gig build.
+- [ ] Conditional: investigate native-MIDI pending-restore ownership with real callback/restore evidence; no unqualified intent bypass.
+
 ### Phase 4 — Measure and Qualify
 
 #### [4.1] Measure latency, CPU, threads and quality variants (Agent + Rix)
@@ -1331,6 +1367,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 | [3.1]–[3.7]            | [FR-2], [FR-3], [FR-4], [FR-5], [FR-6], [FR-7], [FR-9], [FR-10], [NFR-2] | [DES-STATE], [DES-ORDER], [DES-DATA], [DES-ARCH], [DES-TEST]                 |
 | [3.8]–[3.10] | [FR-2], [FR-3], [FR-4], [FR-9], [FR-11], [NFR-4], [NFR-6] | [DES-LIBRARY], [DES-STATE], [DES-SEC], [DES-UI], [DES-TEST], [DES-ROLLOUT] |
 | [3.15] | [FR-15] | [DES-OPERATE], [DES-UI] |
+| [3.16] | [FR-4], [FR-12], [FR-13], [NFR-6] | [DES-RECOVERY], [DES-STATE], [DES-SEC], [DES-ROLLOUT] |
 | [3.11]–[3.14] | [FR-12], [FR-13], [FR-14], [NFR-6] | [DES-OPERATE], [DES-LIBRARY], [DES-SEC], [DES-RELOAD], [DES-UI], [DES-TEST], [DES-ROLLOUT] |
 | [4.1]–[4.5]            | [FR-1], [FR-5], [NFR-1]–[NFR-6]                                          | [DES-TEST], [DES-EVIDENCE], [DES-ERR]                                        |
 | [5.1]–[5.4]            | [FR-3], [FR-5], [FR-6], [FR-7], [FR-8], [FR-10], [NFR-5], [NFR-6]        | [DES-UI], [DES-ROLLOUT], [DES-FILES], [DES-SEC], [DES-TEST]                  |
@@ -1375,5 +1412,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 | 2026-10-05T10:07:48.000Z | [5.1] | Supplementary Chocolate controller physically verified | Detection, standard CC capture, PC capture, global input-channel correction and actual four-rig recall recorded in [DES-OPERATE]. Existing Captain/listening/performance gates remain pending. | [x] | [ ] |
 
 | 2026-10-05T10:48:36.000Z | [5.2] | Boot failure diagnosed / Owner power-sequence experiment observed | Timing and null-fallback source trace, failed delayed-device boot and successful early-Jogg driver start recorded in [DES-OPERATE]. Listening and automatic late-device recovery remain pending; no implementation or configuration changes. | [x] | [ ] |
+
+| 2026-10-07T10:17:25.000Z | [3.16] | Coded / Local checks verified / Device gates pending | Model/socket/panels/defaults/static recovery, qualification helpers and focused tests; staged baseline preserved. Local results, shared-preset validation and pending Linux/device/native-MIDI gates are in [DES-RECOVERY]. | [x] | [ ] |
 
 <!-- SPRINT-SECTION-END: SESSIONS -->

@@ -87,6 +87,44 @@ class QualificationTests(unittest.TestCase):
     @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-SEC] [DES-STATE] [2.6] [3.5] [3.6]
     """
 
+    def test_recovery_board_requires_three_confirmed_captures(self):
+        rpc = ProtocolMock()
+        observed = q.state_observation(rpc.board)
+        expected = {"id": observed["active_preset_id"], "signature": q.signature(observed)}
+        original_request = rpc.request
+        captures = 0
+
+        def request(message, body=None):
+            nonlocal captures
+            if message == "getTone3000CurrentState":
+                self.assertEqual(body, {"instanceId": 51})
+                captures += 1
+                if captures <= 2:
+                    raise RuntimeError("Apply accepted; plugin state has not reflected edit yet")
+                return {"instanceId": 51, "revision": "confirmed"}
+            return original_request(message, body)
+
+        rpc.request = request
+        results = q.wait_observation(rpc, expected, observed["active_preset_name"], 1, sleep=lambda _: None)
+        self.assertEqual(captures, 5)
+        self.assertEqual([r["capture_confirmed"] for r in results], [False, False, True, True, True])
+        self.assertFalse(any(r["matched_expected_identity_and_assets"] for r in results[:2]))
+
+    def test_unavailable_capture_cannot_qualify_a_matching_recovery_board(self):
+        rpc = ProtocolMock()
+        observed = q.state_observation(rpc.board)
+        expected = {"id": observed["active_preset_id"], "signature": q.signature(observed)}
+        original_request = rpc.request
+
+        def request(message, body=None):
+            if message == "getTone3000CurrentState":
+                raise RuntimeError("Current plugin state capture failed; audio may be unavailable.")
+            return original_request(message, body)
+
+        rpc.request = request
+        with self.assertRaisesRegex(RuntimeError, "capture failed"):
+            q.wait_observation(rpc, expected, observed["active_preset_name"], 1, sleep=lambda _: None)
+
     def test_private_output_refuses_existing_git_and_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

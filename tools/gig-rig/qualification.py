@@ -455,18 +455,44 @@ def representative_sets(rpc, identifier, properties, original):
     return changed
 
 
+def current_capture_confirmed(rpc, identifier):
+    """Probe actual state without replaying edits or accepting recovery-only JSON.
+
+    @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [DES-STATE] [3.16]
+    """
+    if isinstance(identifier, bool) or not isinstance(identifier, int):
+        raise ValueError("Current TONE3000 state lacks an instance ID")
+    try:
+        result = rpc.request("getTone3000CurrentState", {"instanceId": identifier})
+    except RuntimeError as error:
+        if "Apply accepted; plugin state has not reflected edit yet" in str(error):
+            return False
+        raise
+    if not isinstance(result, dict) or result.get("instanceId") != identifier or not result.get("revision"):
+        raise ValueError("Unsupported current TONE3000 capture reply")
+    return True
+
+
 def wait_observation(rpc, expected, label, timeout, sleep=time.sleep):
     """Require three repeated matching stored snapshots within a bounded window.
 
+    Confirm capture explicitly: the recovery board may retain accepted state
+    while the actual plugin is unavailable or still restoring.
     Cached state is only an observation; the subsequently saved export is
     independently verified after SyncLv2State. No engine-ready verdict exists.
-    @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STATE] [3.5] [3.6]
+    @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STATE] [DES-RECOVERY] [3.5] [3.6] [3.16]
     """
     deadline, consecutive, observations = time.monotonic() + timeout, 0, []
     while time.monotonic() < deadline:
         observed = state_observation(rpc.request("currentPedalboard"))
-        matched = matches(observed, expected, label)
-        observations.append({"matched_expected_identity_and_assets": matched, "state": observed})
+        confirmed = False
+        if not observed.get("state_string_missing"):
+            confirmed = current_capture_confirmed(rpc, observed.get("instance_id"))
+            if confirmed:
+                observed = state_observation(rpc.request("currentPedalboard"))
+        matched = confirmed and matches(observed, expected, label)
+        observations.append({"matched_expected_identity_and_assets": matched,
+                             "capture_confirmed": confirmed, "state": observed})
         consecutive = consecutive + 1 if matched else 0
         if consecutive == 3:
             return observations

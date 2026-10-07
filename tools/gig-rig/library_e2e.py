@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import stat
 import struct
+import time
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -22,7 +23,7 @@ import uuid
 from gig_rig import ValueTreeReader
 from build_bank import default_item
 from pipedal_rpc import PiPedalRpc
-from qualification import download_saved, private_destination, write_private
+from qualification import current_capture_confirmed, download_saved, private_destination, write_private
 from state_summary import decode_state_string, PLUGIN
 
 # Independent source-pinned Processor.cpp/PitchShift.h values, rather than the
@@ -326,6 +327,14 @@ def recall(rpc, target, output, name, expected_source):
     @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [DES-TEST] [3.10]
     """
     rpc.request('loadTone3000Preset', {key: target[key] for key in ('bankId', 'presetId')})
+    # Ordinary board reads preserve desired state for recovery. Confirm the
+    # plugin explicitly before qualifying identity, parameters or saved assets.
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+    deadline = time.monotonic() + 20
+    while not current_capture_confirmed(rpc, target['instanceId']):
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Expected current TONE3000 capture did not stabilize')
+        time.sleep(.2)
     board = rpc.request('currentPedalboard')
     item, tree = verify_state(board, expected_source)
     expected = expected_source['parameters']

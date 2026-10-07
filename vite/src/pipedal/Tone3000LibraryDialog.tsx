@@ -16,7 +16,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import DialogEx from "./DialogEx";
-import { PiPedalModelFactory } from "./PiPedalModel";
+import { PiPedalModelFactory, State } from "./PiPedalModel";
 import type { Tone3000Import, Tone3000LibraryEntry, Tone3000LibraryResult } from "./Tone3000Library";
 
 /** Discover and explicitly apply complete rigs without operator file copying.
@@ -31,13 +31,15 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
     const [notice, setNotice] = useState("");
     const [search, setSearch] = useState("");
     const [pendingLoad, setPendingLoad] = useState<Tone3000Import | null>(null);
+    const [connected, setConnected] = useState(model.state.get() === State.Ready);
+    const [recoveryNotice, setRecoveryNotice] = useState("");
     const uploadInput = useRef<HTMLInputElement>(null);
     const alive = useRef(false);
     const working = useRef(false);
     const generation = useRef(0);
 
     const refresh = useCallback(async (clearError = false) => {
-        if (working.current || !alive.current) return;
+        if (working.current || !alive.current || model.state.get() !== State.Ready) return;
         const request = ++generation.current;
         setRefreshing(true);
         try {
@@ -55,32 +57,53 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
 
     useEffect(() => {
         alive.current = open;
+        setBusy(false); setRefreshing(false);
         if (!open) return;
-        void refresh(true);
+        /** Invalidate old work; reconciliation is read-only and never replays it.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+         */
+        const connectionChanged = (state: State) => {
+            const ready = state === State.Ready;
+            setConnected(ready);
+            if (!ready) {
+                ++generation.current;
+                if (working.current) setRecoveryNotice("Connection interrupted. The operation may have completed; verify the refreshed library before retrying.");
+                working.current = false;
+                setBusy(false); setRefreshing(false); setPendingLoad(null);
+            } else void refresh();
+        };
+        // ObservableProperty immediately calls new listeners with current state.
+        model.state.addOnChangedHandler(connectionChanged);
         const poll = window.setInterval(() => { void refresh(); }, 15000);
         return () => {
             alive.current = false;
             ++generation.current;
+            working.current = false;
+            model.state.removeOnChangedHandler(connectionChanged);
             window.clearInterval(poll);
         };
-    }, [open, refresh]);
+    }, [open, refresh, model]);
 
-    const run = async (action: () => Promise<string>) => {
-        if (working.current) return;
+    /** Results belong to one connected operation generation, including upload batches.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+     */
+    const run = async (action: (isCurrent: () => boolean) => Promise<string>) => {
+        if (working.current || !alive.current || model.state.get() !== State.Ready) return;
         working.current = true;
-        ++generation.current;
+        const request = ++generation.current;
+        const isCurrent = () => alive.current && request === generation.current && model.state.get() === State.Ready;
         setRefreshing(false);
         setBusy(true);
         setError("");
         setNotice("");
         try {
-            const message = await action();
-            if (alive.current) setNotice(message);
+            const message = await action(isCurrent);
+            if (isCurrent()) setNotice(message);
         } catch (failure) {
-            if (alive.current) setError(String(failure));
+            if (isCurrent()) setError(String(failure));
         } finally {
-            working.current = false;
-            if (alive.current) {
+            if (isCurrent()) {
+                working.current = false;
                 setBusy(false);
                 // Preserve a mutation failure while refreshing stale source metadata.
                 const request = ++generation.current;
@@ -113,12 +136,13 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
         await model.loadTone3000Preset(target.bankId, target.presetId);
         return target.name + " loaded.";
     });
-    const upload = (files: File[]) => run(async () => {
+    const upload = (files: File[]) => run(async isCurrent => {
         let count = 0;
         for (const file of files) {
+            if (!isCurrent()) return "";
             await model.uploadTone3000Preset(file);
             ++count;
-            if (alive.current) setNotice(count + " of " + files.length + " uploaded.");
+            if (isCurrent()) setNotice(count + " of " + files.length + " uploaded.");
         }
         return count + (count === 1 ? " rig uploaded. Select Add to save it in PiPedal." : " rigs uploaded. Select Add to save them in PiPedal.");
     });
@@ -139,8 +163,8 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                         Rigs saved in the Pi's TONE3000 app appear here automatically. Add saves a PiPedal rig; Load plays it.
                     </Typography>
                     <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}>
-                        <Button variant="outlined" disabled={busy || refreshing} onClick={() => { void refresh(true); }}>Refresh</Button>
-                        <Button variant="contained" disabled={busy || refreshing} onClick={() => uploadInput.current?.click()}>Upload presets</Button>
+                        <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => { void refresh(true); }}>Refresh</Button>
+                        <Button variant="contained" disabled={busy || refreshing || !connected} onClick={() => uploadInput.current?.click()}>Upload presets</Button>
                         {(busy || refreshing) && <CircularProgress size={20} aria-label={busy ? "Applying rig" : "Finding rigs"} />}
                         <input ref={uploadInput} type="file" accept=".t3kpreset" multiple hidden
                             aria-label="Choose TONE3000 preset files" onChange={event => {
@@ -153,6 +177,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                         Upload complete .t3kpreset rigs. For NAM models or IRs, add them in TONE3000 and save a preset first.
                     </Typography>
                     {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
+                    {recoveryNotice && <Alert severity="warning" onClose={() => setRecoveryNotice("")}>{recoveryNotice}</Alert>}
                     {notice && <Alert severity="success" onClose={() => setNotice("")}>{notice}</Alert>}
                     {library.warnings.map((warning, index) => <Alert severity="warning" key={index}>{warning}</Alert>)}
                     <TextField label="Find a rig" value={search} onChange={event => setSearch(event.target.value)} size="small" fullWidth />
@@ -169,7 +194,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                                 <Stack direction="row" spacing={1}>
                                     <Chip size="small" label={!entry.imports.length ? "New" : entry.imports.some(target => target.sha256 !== entry.sha256) ? "Update available" : "Added"}
                                         color={entry.imports.some(target => target.sha256 !== entry.sha256) ? "warning" : "default"} />
-                                    <Button disabled={busy || refreshing} onClick={() => { void add(entry, entry.imports.length > 0); }}>
+                                    <Button disabled={busy || refreshing || !connected} onClick={() => { void add(entry, entry.imports.length > 0); }}>
                                         {entry.imports.length ? "Add as new" : "Add"}
                                     </Button>
                                 </Stack>
@@ -179,9 +204,9 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                                 <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
                                     <Typography variant="body2">{target.name}{target.active ? " · Current rig" : ""}</Typography>
                                     <Stack direction="row" spacing={1}>
-                                        {target.sha256 !== entry.sha256 && <Button disabled={busy || refreshing}
+                                        {target.sha256 !== entry.sha256 && <Button disabled={busy || refreshing || !connected}
                                             onClick={() => { void update(entry, target); }}>{target.active ? "Update & load" : "Update"}</Button>}
-                                        <Button variant="outlined" disabled={busy || refreshing} onClick={() => load(target)}>Load</Button>
+                                        <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => load(target)}>Load</Button>
                                     </Stack>
                                 </Stack>
                                 {target.hasSnapshotOverrides && <Typography variant="caption" color="text.secondary">

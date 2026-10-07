@@ -669,15 +669,14 @@ static bool encoding_allowed(const std::string& acceptEncodingHeader, const std:
 static bool can_use_gzip_encoding(
     const std::string& acceptEncodingHeader,
     const std::filesystem::path& filename,
-    std::filesystem::path* gzName)
+    std::filesystem::path* gzName,
+    std::error_code& error)
 {
+    error.clear();
     if (!encoding_allowed(acceptEncodingHeader, "gzip"))
         return false;
     *gzName = filename.string() + ".gz";
-    if (std::filesystem::exists(*gzName)) {
-        return true;
-    }
-    return false;
+    return std::filesystem::exists(*gzName,error);
 }
 
 
@@ -1183,15 +1182,27 @@ namespace pipedal
 
             size_t contentLength = 0;
 
-            if (can_use_gzip_encoding(req.get(HttpField::accept_encoding), filename, &gzName))
+            // Upstream d104a8d87de4 turns failed static-file metadata into 404.
+            // Include gzip selection/metadata: either file can disappear while
+            // frontend assets are published, without unwinding the web thread.
+            // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+            std::error_code fileError;
+            bool useGzip = can_use_gzip_encoding(req.get(HttpField::accept_encoding), filename, &gzName,fileError);
+            if (fileError)
+            {
+                NotFound(*con, requestUri.str());
+                return;
+            }
+            if (useGzip)
             {
                 filename = gzName;
-                contentLength = std::filesystem::file_size(filename);
-                res.set(HttpField::content_encoding, "gzip");
-            } else {
-                contentLength = std::filesystem::file_size(filename);                
             }
-
+            contentLength = std::filesystem::file_size(filename,fileError);
+            if (fileError)
+            {
+                NotFound(*con, requestUri.str());
+                return;
+            }
             if (req.method() != HttpVerb::get)
             {
                 ServerError(*con, "Unknown HTTP-Method");
@@ -1203,6 +1214,10 @@ namespace pipedal
             {
                 NotFound(*con, requestUri.str());
                 return;
+            }
+            if (useGzip)
+            {
+                res.set(HttpField::content_encoding, "gzip");
             }
 
             response.reserve(contentLength);

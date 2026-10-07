@@ -27,6 +27,14 @@ struct Temporary {
     }
     ~Temporary(){std::error_code error;fs::remove_all(path,error);}
 };
+struct ScopedConfigHome {
+    std::optional<std::string> previous;
+    explicit ScopedConfigHome(const fs::path& path) {
+        if(const char* value=getenv("XDG_CONFIG_HOME")) previous=value;
+        if(setenv("XDG_CONFIG_HOME",path.c_str(),1)) throw std::runtime_error("Fixture environment setup failed");
+    }
+    ~ScopedConfigHome(){if(previous) setenv("XDG_CONFIG_HOME",previous->c_str(),1);else unsetenv("XDG_CONFIG_HOME");}
+};
 void Put(const fs::path& file,const std::string& text) {
     fs::create_directories(file.parent_path());std::ofstream out(file,std::ios::binary);out<<text;
     if(!out) throw std::runtime_error("Fixture write failed");
@@ -92,6 +100,35 @@ TEST_CASE("Tone3000 defaults reject unsafe XML paths and nonfinite values withou
     fs::create_hard_link(file,temp.path/"hard.settings");REQUIRE_THROWS(store.Get());
     fs::remove(temp.path/"hard.settings");Put(temp.path/"app.settings","<invalid/>");
     auto app=Tone3000DefaultsStore(temp.path,file,{temp.path/"app.settings"}).Get();REQUIRE_FALSE(app.appDefaults_);REQUIRE(app.warnings_.size()==1);
+}
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16] */
+TEST_CASE("Tone3000 optional app roots cannot block authoritative defaults or admit links","[gig_rig][gig_rig_defaults][Build]") {
+    Temporary temp;ScopedConfigHome config(temp.path/"service");
+    auto service=temp.path/"service/TONE3000/preferences.settings";
+    Tone3000DefaultsStore seed(temp.path,service,{});auto initial=seed.Get();
+    auto saved=seed.Save({initial.revision_,"home",initial.defaults_});auto original=Read(service);
+    auto app=temp.path/"app/TONE3000";Put(app/"preferences.settings",AppXml());
+    fs::create_directories(app/"real-presets");
+    fs::create_directory_symlink(app/"real-presets",app/"Presets");
+    Tone3000DefaultsStore store(temp.path,std::vector<std::string>{(app/"Presets").string()});
+    auto result=store.Get();
+    REQUIRE(result.sourceStatus_=="service-profile");REQUIRE(result.revision_==saved.revision_);
+    REQUIRE(Json(result.defaults_)==Json(saved.defaults_));REQUIRE_FALSE(result.appDefaults_);
+    REQUIRE(result.warnings_.size()==1);REQUIRE(Read(service)==original);
+    auto changed=Tone3000DefaultsRequest{result.revision_,"live",result.defaults_};changed.defaults_.osFactor_=2;
+    auto updated=store.Save(changed);REQUIRE(updated.defaults_.osFactor_==2);REQUIRE(updated.sourceStatus_=="service-profile");
+    REQUIRE_FALSE(updated.appDefaults_);REQUIRE(updated.warnings_.size()==1);
+    // Validate roots on every read, including a root changed after construction.
+    fs::remove(app/"Presets");fs::create_directory(app/"Presets");
+    REQUIRE(store.Get().appDefaults_.has_value());
+    fs::remove(app/"Presets");fs::create_directory_symlink(app/"real-presets",app/"Presets");
+    REQUIRE_FALSE(store.Get().appDefaults_);
+    // App preferences remain optional even before a service profile exists.
+    fs::remove(service);auto fallback=store.Get();REQUIRE(fallback.sourceStatus_=="pinned-defaults");
+    REQUIRE(fallback.warnings_.size()==1);REQUIRE_FALSE(fs::exists(service));
+    REQUIRE_THROWS(Tone3000DefaultsStore(temp.path,std::vector<std::string>{"relative/Presets"}));
+    REQUIRE_THROWS(Tone3000DefaultsStore(temp.path,std::vector<std::string>{(app/"../Presets").string()}));
+    REQUIRE_THROWS(Tone3000DefaultsStore(temp.path,std::vector<std::string>(9,(app/"Presets").string())));
 }
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [DES-SEC] [3.12] */
 TEST_CASE("Tone3000 operations reject unmapped fields and preserve false zero sparse edits","[gig_rig][gig_rig_defaults][Build]") {

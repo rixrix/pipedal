@@ -19,7 +19,7 @@ import Typography from "@mui/material/Typography";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import type { Tone3000BlockFocus } from "./Tone3000BlockFocus";
 import JackHostStatus from "./JackHostStatus";
-import { PiPedalModelFactory } from "./PiPedalModel";
+import { PiPedalModelFactory, State } from "./PiPedalModel";
 import { ObservableProperty } from "./ObservableProperty";
 import { tone3000BlockChanges, tone3000ValidBlocks } from "./Tone3000Rig";
 import type { Tone3000Block, Tone3000CurrentState, Tone3000Defaults, Tone3000DefaultsResult,
@@ -200,6 +200,8 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     const [notice, setNotice] = useState("");
     const [stale, setStale] = useState(false);
     const [waiting, setWaiting] = useState(false);
+    const [connected, setConnected] = useState(model.state.get() === State.Ready);
+    const [recoveryNotice, setRecoveryNotice] = useState("");
     const blockCards = useRef(new Map<string, HTMLDivElement>());
     const lastFocused = useRef<Tone3000BlockFocus | null>(null);
     useEffect(() => {
@@ -214,6 +216,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     const alive = useRef(true);
     const working = useRef(false);
     const generation = useRef(0);
+    const operationGeneration = useRef(0);
     const waitingRef = useRef(waiting);
     waitingRef.current = waiting;
     const rigDirty = useRef(false);
@@ -230,11 +233,13 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         profileDirty.current = false;
     }, []);
     useEffect(() => {
+        ++operationGeneration.current;
+        working.current = false; setBusy(false);
         setRig(null); setDraft(null); setWaiting(false); setStale(false); setError(""); setNotice("");
         rigDirty.current = false;
     }, [instanceId]);
     const refresh = useCallback(async (reset = false) => {
-        if (!alive.current || working.current) return;
+        if (!alive.current || working.current || model.state.get() !== State.Ready) return;
         const request = ++generation.current;
         try {
             const value = await model.getTone3000CurrentState(instanceId);
@@ -262,15 +267,37 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     }, [model, instanceId, section, acceptRig, acceptDefaults]);
     useEffect(() => {
         alive.current = true;
-        if (active) void refresh();
+        /** Preserve local drafts, release interrupted work, and reconcile only reads.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+         */
+        const connectionChanged = (state: State) => {
+            const ready = state === State.Ready;
+            setConnected(ready);
+            if (!ready) {
+                ++generation.current; ++operationGeneration.current;
+                if (working.current) setRecoveryNotice("Connection interrupted. The operation may have completed; verify captured settings and saved defaults before retrying.");
+                working.current = false;
+                setBusy(false); setWaiting(false);
+            } else if (active) void refresh();
+        };
+        model.state.addOnChangedHandler(connectionChanged);
         const timer = active ? window.setInterval(() => { void refresh(); }, 5000) : undefined;
-        return () => { alive.current = false; ++generation.current; window.clearInterval(timer); };
-    }, [active, refresh]);
+        return () => {
+            alive.current = false; ++generation.current;
+            model.state.removeOnChangedHandler(connectionChanged);
+            window.clearInterval(timer);
+        };
+    }, [active, refresh, model]);
+    useEffect(() => () => { ++operationGeneration.current; working.current = false; }, []);
 
+    /** Interrupted generations cannot accept replies or release a newer action's guard.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+     */
     const run = async (action: (isCurrent: () => boolean) => Promise<string>) => {
-        if (working.current) return;
-        working.current = true; const request = ++generation.current;
-        const isCurrent = () => alive.current && request === generation.current;
+        if (working.current || !alive.current || model.state.get() !== State.Ready) return;
+        working.current = true; ++generation.current;
+        const request = ++operationGeneration.current;
+        const isCurrent = () => alive.current && request === operationGeneration.current && model.state.get() === State.Ready;
         setBusy(true); setError(""); setNotice("");
         try {
             const message = await action(isCurrent);
@@ -278,8 +305,10 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         } catch (failure) {
             if (isCurrent()) setError(String(failure));
         } finally {
-            working.current = false;
-            if (alive.current) setBusy(false);
+            if (request === operationGeneration.current) {
+                working.current = false;
+                if (alive.current) setBusy(false);
+            }
         }
     };
     const edit = (patch: Partial<Tone3000Summary>, processing = false) => {
@@ -325,9 +354,10 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     return <Stack spacing={2} sx={{ px: 1, maxWidth: 1100 }}>
         <Box sx={rowStyle}>
             <Typography component="h2" variant="h6">{section === "Blocks" ? "Rig blocks" : "TONE3000 settings"}</Typography>
-            <Button disabled={busy} onClick={() => { void refresh(true); }}>Refresh</Button>
+            <Button disabled={busy || !connected} onClick={() => { void refresh(true); }}>Refresh</Button>
         </Box>
         {error && <Alert severity="error">{error}</Alert>}
+        {recoveryNotice && <Alert severity="warning" onClose={() => setRecoveryNotice("")}>{recoveryNotice}</Alert>}
         {notice && <Alert severity="success">{notice}</Alert>}
         {stale && <Alert severity="warning">The rig changed elsewhere. Refresh to discard this draft and get its latest settings.</Alert>}
         {!rig || !draft ? <Typography>Reading current TONE3000 state…</Typography> : <>
@@ -337,7 +367,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
             <Typography variant="body2" color="text.secondary">
                 Apply may briefly reload this TONE3000 instance. Library Update replaces local tone/block tweaks from your T3K source.
             </Typography>
-            <Box component="fieldset" disabled={busy || waiting} sx={{ border: 0, p: 0, m: 0, minWidth: 0 }}>
+            <Box component="fieldset" disabled={busy || waiting || !connected} sx={{ border: 0, p: 0, m: 0, minWidth: 0 }}>
                 {section === "Blocks" ? <Stack spacing={2}>
                     {draft.blocks.filter(block => block.type !== "insert").map(block => <Box key={block.blockId}
                         ref={(card: HTMLDivElement | null) => { if (card) blockCards.current.set(block.blockId, card); else blockCards.current.delete(block.blockId); }}

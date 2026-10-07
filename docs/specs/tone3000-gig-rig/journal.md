@@ -3,7 +3,7 @@ afx: true
 type: JOURNAL
 owner: "@rixrix"
 created_at: "2026-10-03T23:59:54.000Z"
-updated_at: "2026-10-05T10:48:36.000Z"
+updated_at: "2026-10-07T10:17:25.000Z"
 tags: ["tone3000-gig-rig", "journal"]
 ---
 
@@ -169,6 +169,11 @@ Append-only continuity for [the sprint](tone3000-gig-rig.md). Original blueprint
   `[boot, delayed-usb, audio-recovery, diagnostic, auto-capture]`
   **Impact**: [FR-7]/[5.2] gap. The initial missing configured device falls back to null; the owner's interface-first power-cycle subsequently starts the actual device automatically. Exact timing, source trace and limits are retained in sprint [DES-OPERATE] through the existing qualification workflow.
   **Action**: investigated → no source/configuration writes. Owner listening confirmation pending; late-device recovery remains unresolved, and no full cold-boot/gig acceptance is inferred. Approval stages remain Approved.
+
+- **2026-10-07T10:17:25.000Z** — [AUTO:afx-sprint] Rix approved proceeding with reviewed recovery corrections while preserving the staged snapshot; also requested validation of shared T3K presets.
+  `[implementation, upstream-review, recovery, unstaged, preset-import, auto-capture]`
+  **Impact**: sprint v1.9, [DES-RECOVERY]/[3.16]. Local Agent implementation and checks complete; technical findings, exact evidence and remaining qualification are recorded entirely in sprint Design. Existing index/staged baseline preserved.
+  **Action**: locally verified → retain unstaged changes for review. Pi remains off; no deployment or import performed. Linux/device, native-MIDI ownership and Human/gig gates remain open. Spec/Design/Tasks remain Approved under explicit authorization and existing delegation.
 
 ## Discussions
 

@@ -255,7 +255,7 @@ namespace pipedal
         std::map<int64_t,Tone3000StateSummary> pendingTone3000States;
         void ApplyTone3000FollowDefaults(Pedalboard& board);
         void RegisterTone3000Intents();
-        void GuardTone3000PendingStates();
+        void GuardTone3000PendingStates(bool requireCapture = true);
         PedalboardItem& CaptureTone3000Item(int64_t instanceId);
 
     private: // IAudioHostCallbacks
@@ -382,10 +382,13 @@ namespace pipedal
         const PluginHost &GetPluginHost() const { return pluginHost; }
         PluginHost &GetPluginHost() { return pluginHost; }
 
+        /** Ordinary observation remains available for recovery while a plugin is restoring.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+         */
         Pedalboard GetCurrentPedalboardCopy()
         {
             std::lock_guard<std::recursive_mutex> guard(mutex);
-            GuardTone3000PendingStates();
+            GuardTone3000PendingStates(false);
             return pedalboard; // can return a referece because we'd lose  mutex protection
         }
         PluginUiPresets GetPluginUiPresets(const std::string &pluginUri);

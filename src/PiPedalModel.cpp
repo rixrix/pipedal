@@ -2722,13 +2722,23 @@ PedalboardItem& PiPedalModel::CaptureTone3000Item(int64_t instanceId) {
     }
     return *item;
 }
-void PiPedalModel::GuardTone3000PendingStates() {
+/** Best-effort observation preserves the recovery board; persistence still requires capture.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [DES-STATE] [3.16]
+ */
+void PiPedalModel::GuardTone3000PendingStates(bool requireCapture) {
     std::vector<int64_t> ids;
     for(const auto& [id,intent]:pendingTone3000States) ids.push_back(id);
     for(auto id:ids) {
         auto item=pedalboard.GetItem(id);
         if(!item || item->uri()!=Tone3000Preset::PLUGIN_URI) pendingTone3000States.erase(id);
-        else CaptureTone3000Item(id);
+        else {
+            try { CaptureTone3000Item(id); }
+            catch (const std::exception&) {
+                if (requireCapture) throw;
+                // Keep the accepted state and pending intent. A later explicit capture
+                // can confirm restoration; one unavailable instance must not block others.
+            }
+        }
     }
 }
 Tone3000CurrentStateResult PiPedalModel::GetTone3000CurrentState(const Tone3000CurrentStateRequest& request) {

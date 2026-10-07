@@ -51,6 +51,6 @@ public:
     static void Validate(const Tone3000ProcessingDefaults& defaults);
 private:
     std::filesystem::path dataRoot,serviceFile;
-    std::vector<std::filesystem::path> appFiles;
+    std::vector<std::filesystem::path> appFiles,appSourceRoots;
 };
 }
