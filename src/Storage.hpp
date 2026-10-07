@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <iostream>
 #include "Pedalboard.hpp"
+#include "Tone3000Library.hpp"
 #include "Presets.hpp"
 #include "PluginPreset.hpp"
 #include "Banks.hpp"
@@ -178,6 +179,10 @@ public:
     void GetBankFile(int64_t instanceId,BankFile*pResult) const;
     int64_t UploadPreset(const BankFile&bankFile, int64_t uploadAfter);
     int64_t UploadBank(BankFile&bankFile, int64_t uploadAfter);
+    /** Persist one library entry without selecting a bank or changing audio.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9]
+     */
+    Tone3000ImportResult SaveTone3000Preset(int64_t bankId, int64_t presetId, Pedalboard& board, int64_t instanceId);
 
     
     bool LoadPreset(int64_t presetId);

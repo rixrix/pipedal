@@ -2211,6 +2211,7 @@ public:
 private:
     // virtual bool UpdatePluginStates(Pedalboard &pedalboard) override;
     virtual bool UpdatePluginState(PedalboardItem &pedalboardItem) override;
+    virtual bool CapturePluginState(uint64_t instanceId, Lv2PluginState* state) override;
 
     class RestartThread
     {
@@ -2502,32 +2503,22 @@ void AudioHostImpl::OnNotifyPathPatchPropertyReceived(
     }
 }
 
-bool AudioHostImpl::UpdatePluginState(PedalboardItem &pedalboardItem)
+/** Explicit capture success, distinct from a state that has not changed.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
+ */
+bool AudioHostImpl::CapturePluginState(uint64_t instanceId,Lv2PluginState* state)
 {
-    IEffect *effect = currentPedalboard->GetEffect(pedalboardItem.instanceId());
-    if (effect != nullptr)
-    {
-        try
-        {
-            Lv2PluginState state;
-            if (!effect->GetLv2State(&state))
-            {
-                return false;
-            }
-            if (state != pedalboardItem.lv2State())
-            {
-                pedalboardItem.lv2State(state);
-                return true;
-            }
-            return false;
-        }
-        catch (const std::exception &e)
-        {
-            Lv2Log::warning(SS(pedalboardItem.pluginName() << ": " << e.what()));
-            return false;
-        }
-    }
-    return false;
+    if (!currentPedalboard || !state) return false;
+    IEffect* effect=currentPedalboard->GetEffect(instanceId);
+    if (!effect) return false;
+    try {return effect->GetLv2State(state);}
+    catch (const std::exception&) {return false;}
+}
+bool AudioHostImpl::UpdatePluginState(PedalboardItem& item)
+{
+    Lv2PluginState state;
+    if (!CapturePluginState(item.instanceId(),&state) || state==item.lv2State()) return false;
+    item.lv2State(state);return true;
 }
 
 void AudioHostImpl::OnWritePatchPropertyBuffer(

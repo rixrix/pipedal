@@ -102,6 +102,8 @@ JSON_MAP_REFERENCE(PiPedalConfiguration, logLevel)
 JSON_MAP_REFERENCE(PiPedalConfiguration, logHttpRequests)
 JSON_MAP_REFERENCE(PiPedalConfiguration, maxUploadSize)
 JSON_MAP_REFERENCE(PiPedalConfiguration, tone3000A2Models)
+// @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9]
+JSON_MAP_REFERENCE(PiPedalConfiguration, tone3000PresetRoots)
 JSON_MAP_REFERENCE(PiPedalConfiguration, accessPointGateway)
 JSON_MAP_REFERENCE(PiPedalConfiguration, accessPointServerAddress)
 JSON_MAP_REFERENCE(PiPedalConfiguration, isVst3Enabled)

@@ -1,0 +1,182 @@
+--- a/modules/juce_audio_plugin_client/juce_audio_plugin_client_LV2.cpp
++++ b/modules/juce_audio_plugin_client/juce_audio_plugin_client_LV2.cpp
+@@ -188,6 +188,20 @@
+                 param->setValueNotifyingHost (scaledValue);
+             }
+         }
++    }
++
++    // T3K_LV2_PATCH_GET: enqueue authoritative replies without model work.
++    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-UI] [2.8]
++    void requestValueFromHost (LV2_URID urid) noexcept
++    {
++        if (const auto it = uridToIndexMap.find (urid); it != uridToIndexMap.end())
++            stateCache.setBits (it->second, newClientValue);
++    }
++
++    void requestAllValuesFromHost() noexcept
++    {
++        for (size_t index = 0; index < indexToUridMap.size(); ++index)
++            stateCache.setBits (index, newClientValue);
+     }
+ 
+     struct Options
+@@ -489,9 +503,26 @@
+     template <typename Callback>
+     void forEachInputEvent (Callback&& callback)
+     {
+-        if (inputData != nullptr && inputData->atom.type == mLV2_ATOM__Sequence)
+-            for (const auto* event : lv2_shared::SequenceIterator { lv2_shared::SequenceWithSize { inputData } })
+-                callback (event);
++        if (inputData == nullptr || inputData->atom.type != mLV2_ATOM__Sequence
++            || inputData->atom.size < sizeof (LV2_Atom_Sequence_Body))
++            return;
++
++        // Bound every event by the sequence payload before any object parser
++        // sees it. The host owns the backing buffer and its declared size.
++        auto* cursor = reinterpret_cast<const uint8_t*> (&inputData->body + 1);
++        auto remaining = (size_t) inputData->atom.size - sizeof (LV2_Atom_Sequence_Body);
++        while (remaining >= sizeof (LV2_Atom_Event))
++        {
++            const auto* event = reinterpret_cast<const LV2_Atom_Event*> (cursor);
++            const auto bodySize = (size_t) event->body.size;
++            const auto paddedBodySize = (bodySize + 7u) & ~(size_t) 7u;
++            if (paddedBodySize > remaining - sizeof (LV2_Atom_Event))
++                break;
++            callback (event);
++            const auto eventSize = sizeof (LV2_Atom_Event) + paddedBodySize;
++            cursor += eventSize;
++            remaining -= eventSize;
++        }
+     }
+ 
+     void prepareToWrite()
+@@ -596,6 +627,71 @@
+         return count;
+     }
+ 
++    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-UI] [2.8]
++    static bool isWellFormedObject (const LV2_Atom_Event* event) noexcept
++    {
++        if (event->body.size < sizeof (LV2_Atom_Object_Body))
++            return false;
++        auto* cursor = reinterpret_cast<const uint8_t*> (event + 1) + sizeof (LV2_Atom_Object_Body);
++        auto remaining = (size_t) event->body.size - sizeof (LV2_Atom_Object_Body);
++        while (remaining != 0)
++        {
++            if (remaining < sizeof (LV2_Atom_Property_Body))
++                return false;
++            const auto* property = reinterpret_cast<const LV2_Atom_Property_Body*> (cursor);
++            const auto paddedValueSize = ((size_t) property->value.size + 7u) & ~(size_t) 7u;
++            if (paddedValueSize > remaining - sizeof (LV2_Atom_Property_Body))
++                return false;
++            const auto propertySize = sizeof (LV2_Atom_Property_Body) + paddedValueSize;
++            cursor += propertySize;
++            remaining -= propertySize;
++        }
++        return true;
++    }
++
++    // Objects have already passed the structural bounds check above.
++    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-UI] [2.8]
++    void processPatchGet (const LV2_Atom_Event* event) noexcept
++    {
++        if (event->body.type != patchSetHelper.mLV2_ATOM__Object)
++            return;
++        const auto* object = reinterpret_cast<const LV2_Atom_Object*> (&event->body);
++        if (object->body.otype != mLV2_PATCH__Get)
++            return;
++        const LV2_Atom* subject = nullptr;
++        const LV2_Atom* property = nullptr;
++        auto* cursor = reinterpret_cast<const uint8_t*> (&object->body + 1);
++        auto remaining = (size_t) object->atom.size - sizeof (LV2_Atom_Object_Body);
++        while (remaining != 0)
++        {
++            const auto* entry = reinterpret_cast<const LV2_Atom_Property_Body*> (cursor);
++            if (entry->key == patchSetHelper.mLV2_PATCH__subject)
++            {
++                if (subject != nullptr) return;
++                subject = &entry->value;
++            }
++            else if (entry->key == patchSetHelper.mLV2_PATCH__property)
++            {
++                if (property != nullptr) return;
++                property = &entry->value;
++            }
++            const auto propertySize = sizeof (LV2_Atom_Property_Body) + (((size_t) entry->value.size + 7u) & ~(size_t) 7u);
++            cursor += propertySize;
++            remaining -= propertySize;
++        }
++        const auto isUrid = [this] (const LV2_Atom* atom)
++        {
++            return atom->type == patchSetHelper.mLV2_ATOM__URID && atom->size == sizeof (LV2_URID);
++        };
++        if (subject != nullptr && (! isUrid (subject)
++            || readUnaligned<LV2_URID> (subject + 1) != patchSetHelper.pluginUrid))
++            return;
++        if (property == nullptr)
++            parameters.requestAllValuesFromHost();
++        else if (isUrid (property))
++            parameters.requestValueFromHost (readUnaligned<LV2_URID> (property + 1));
++    }
++
+     void run (uint32_t numSteps)
+     {
+         // If this is hit, the host is trying to process more samples than it told us to prepare
+@@ -611,6 +707,9 @@
+ 
+         ports.forEachInputEvent ([&] (const LV2_Atom_Event* event)
+         {
++            if (event->body.type == patchSetHelper.mLV2_ATOM__Object && ! isWellFormedObject (event))
++                return;
++            processPatchGet (event);
+             struct Callback
+             {
+                 explicit Callback (LV2PluginInstance& s) : self (s) {}
+@@ -683,7 +782,13 @@
+ 
+         ports.prepareToWrite();
+         auto* forge = ports.forge.get();
++        if (forge->size < sizeof (LV2_Atom_Sequence))
++            return; // Keep all pending replies when even the header cannot fit.
+         lv2_shared::SequenceFrame sequence { forge, (uint32_t) 0 };
++        const auto canWrite = [forge] (size_t bytes)
++        {
++            return forge->offset <= forge->size && bytes <= forge->size - forge->offset;
++        };
+ 
+         parameters.forEachChangedParameter ([&] (const AudioProcessorParameter& param,
+                                                  LV2_URID paramUrid,
+@@ -700,6 +805,14 @@
+ 
+             if (options.parameterValue)
+             {
++                // A Float patch:Set event needs 72 bytes including time and
++                // padding. Cache flags clear before this callback, so requeue
++                // preserves the request for the next block without allocation.
++                if (! canWrite (72))
++                {
++                    parameters.requestValueFromHost (paramUrid);
++                    return;
++                }
+                 lv2_atom_forge_frame_time (forge, 0);
+ 
+                 lv2_shared::ObjectFrame object { forge, (uint32_t) 0, patchSetHelper.mLV2_PATCH__Set };
+@@ -721,7 +834,8 @@
+                 sendTouched (false);
+         });
+ 
+-        if (shouldSendStateChange.exchange (false))
++        if (canWrite (sizeof (LV2_Atom_Event) + sizeof (LV2_Atom_Object_Body))
++            && shouldSendStateChange.exchange (false))
+         {
+             lv2_atom_forge_frame_time (forge, 0);
+             lv2_shared::ObjectFrame { forge, (uint32_t) 0, mLV2_STATE__StateChanged };
+@@ -892,6 +1006,7 @@
+     X (LV2_BUF_SIZE__sequenceSize)
+     X (LV2_MIDI__MidiEvent)
+     X (LV2_PATCH__Set)
++    X (LV2_PATCH__Get)
+     X (LV2_STATE__StateChanged)
+    #undef X
+ 

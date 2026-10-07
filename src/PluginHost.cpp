@@ -309,6 +309,9 @@ std::string PluginHost::GetPluginStoragePath() const
     return pluginStoragePath;
 }
 
+/**
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-1] [DES-COMPAT] [1.7]
+ */
 PluginHost::PluginHost()
 {
     pWorld = nullptr;
@@ -319,6 +322,11 @@ PluginHost::PluginHost()
 
     fileMetadataFeature.Prepare(mapFeature);
     lv2Features.push_back(fileMetadataFeature.GetFeature());
+
+    // Staged audio blocks never exceed the advertised maxBlockLength. Keep the
+    // feature in the host, so all instantiate arrays retain a valid pointer.
+    boundedBlockLengthFeature = {LV2_BUF_SIZE__boundedBlockLength, nullptr};
+    lv2Features.push_back(&boundedBlockLengthFeature);
 
     lv2Features.push_back(nullptr);
 
@@ -1565,7 +1573,7 @@ std::shared_ptr<Lv2PluginInfo> PluginHost::GetPluginInfo(const std::string &uri)
     return ff->second;
 }
 
-Lv2Pedalboard *PluginHost::UpdateLv2PedalboardStructure(Pedalboard &pedalboard, Lv2Pedalboard *existingPedalboard, Lv2PedalboardErrorList &errorList)
+Lv2Pedalboard *PluginHost::UpdateLv2PedalboardStructure(Pedalboard &pedalboard, Lv2Pedalboard *existingPedalboard, Lv2PedalboardErrorList &errorList, const std::vector<int64_t>& forceReloadIds)
 {
     ExistingEffectMap existingEffects;
 
@@ -1573,7 +1581,9 @@ Lv2Pedalboard *PluginHost::UpdateLv2PedalboardStructure(Pedalboard &pedalboard, 
     {
         for (auto &effect : existingPedalboard->GetSharedEffectList())
         {
-            if (effect->IsLv2Effect())
+            // Only explicit target IDs are removed from the ordinary reuse map.
+            // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
+            if (effect->IsLv2Effect() && std::find(forceReloadIds.begin(),forceReloadIds.end(),effect->GetInstanceId())==forceReloadIds.end())
             {
                 existingEffects[effect->GetInstanceId()] = effect;
             }

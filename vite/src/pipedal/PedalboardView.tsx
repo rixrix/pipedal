@@ -37,6 +37,9 @@ import Draggable from './Draggable'
 import Rect from './Rect';
 import { PiPedalStateError } from './PiPedalError';
 import Utility from './Utility';
+import Tone3000ChainView from './Tone3000ChainView';
+import type { Tone3000Summary } from './Tone3000Rig';
+import { projectTone3000Chain, tone3000ChainFootprint } from './Tone3000ChainProjection';
 import { isDarkMode } from './DarkMode';
 import {
     Pedalboard, PedalboardItem, PedalboardSplitItem, SplitType
@@ -236,6 +239,26 @@ const pedalboardStyles = (theme: Theme) => createStyles({
 
 export type OnSelectHandler = (selectedPedal: number) => void;
 
+/** Renderer-only metadata; never registered as host plugins.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-OPERATE] [3.15]
+ */
+export interface PedalboardDisplayNode {
+    name: string;
+    pluginType: PluginType;
+    numberOfInputs: number;
+    numberOfOutputs: number;
+    clickable?: boolean;
+}
+/** Actual dimensions/terminal offsets reported by the existing renderer.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-OPERATE] [3.15]
+ */
+export interface PedalboardDisplayLayout { width: number; height: number; inputY: number; outputY: number; }
+/** Server observations are supplied by the main-page owner, never polled here.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-OPERATE] [3.15]
+ */
+export interface Tone3000ChainCapture { summary?: Tone3000Summary; error?: string; }
+const TONE3000_URI = "https://www.tone3000.com/plugin";
+
 interface PedalboardProps extends WithStyles<typeof pedalboardStyles> {
     theme: Theme;
     selectedId?: number;
@@ -243,6 +266,18 @@ interface PedalboardProps extends WithStyles<typeof pedalboardStyles> {
     onDoubleClick?: OnSelectHandler;
     hasTinyToolBar: boolean;
     enableStructureEditing: boolean;
+    readOnly?: boolean;
+    displayBoard?: Pedalboard;
+    displayNodes?: Readonly<Record<number, PedalboardDisplayNode>>;
+    displayInputChannels?: number;
+    displayOutputChannels?: number;
+    onDisplayLayout?: (layout: PedalboardDisplayLayout) => void;
+    tone3000Chains?: Readonly<Record<number, Tone3000ChainCapture>>;
+    onDisplayNodeClick?: (localDisplayId: number) => void;
+    onTone3000BlockClick?: (instanceId: number, blockId: string) => void;
+    onTone3000ParentClick?: () => void;
+    tone3000FocusedBlock?: { instanceId: number; blockId: string } | null;
+    omitDisplayTerminals?: boolean;
 
 }
 interface LayoutSize {
@@ -252,17 +287,19 @@ interface LayoutSize {
 
 type PedalboardState = {
     pedalboard?: Pedalboard;
+    tone3000Layouts: Record<number, PedalboardDisplayLayout>;
 };
 
 const EMPTY_PEDALS: PedalLayout[] = [];
 
 
-function makeChain(model: PiPedalModel, uiItems?: PedalboardItem[]): PedalLayout[] {
+function makeChain(model: PiPedalModel, uiItems?: PedalboardItem[], displayNodes?: Readonly<Record<number, PedalboardDisplayNode>>,
+    tone3000Chains?: Readonly<Record<number, Tone3000ChainCapture>>): PedalLayout[] {
     let result: PedalLayout[] = [];
     if (uiItems) {
         for (let i = 0; i < uiItems.length; ++i) {
             let item = uiItems[i];
-            result.push(new PedalLayout(model, item));
+            result.push(new PedalLayout(model, item, displayNodes, tone3000Chains));
         }
     }
     return result;
@@ -283,6 +320,11 @@ class PedalLayout {
     originalOutputs: number = 2;
 
     pedalItem?: PedalboardItem;
+    displayNode?: PedalboardDisplayNode;
+    tone3000Chain?: Tone3000ChainCapture;
+    tone3000Inline = false;
+    tone3000Layout?: PedalboardDisplayLayout;
+    connectionY?: number;
 
     // Split Layout only.
     topChildren: PedalLayout[] = EMPTY_PEDALS;
@@ -309,7 +351,8 @@ class PedalLayout {
         t.numberOfOutputs = 0;
         return t;
     }
-    constructor(model?: PiPedalModel, pedalItem?: PedalboardItem) {
+    constructor(model?: PiPedalModel, pedalItem?: PedalboardItem, displayNodes?: Readonly<Record<number, PedalboardDisplayNode>>,
+        tone3000Chains?: Readonly<Record<number, Tone3000ChainCapture>>) {
         if (model === undefined && pedalItem === undefined) {
             return;
         }
@@ -318,16 +361,33 @@ class PedalLayout {
         }
         this.pedalItem = pedalItem;
         this.uri = pedalItem.uri;
+        this.displayNode = displayNodes?.[pedalItem.instanceId];
+        if (tone3000Chains && this.uri === TONE3000_URI) {
+            this.tone3000Chain = tone3000Chains[pedalItem.instanceId] ?? {};
+            if (this.tone3000Chain.summary) {
+                try {
+                    projectTone3000Chain(this.tone3000Chain.summary);
+                    this.tone3000Inline = this.tone3000Chain.summary.blocks.some(block => block.type !== "insert"
+                        && (this.tone3000Chain!.summary!.stereoEnabled || block.lane === "left"));
+                } catch { /* A controlled compact host icon is the unsupported-state fallback. */ }
+            }
+        }
         if (pedalItem.isSplit()) {
             let splitter = pedalItem as PedalboardSplitItem;
 
             this.pluginType = PluginType.UtilityPlugin;
-            this.topChildren = makeChain(model, splitter.topChain);
-            this.bottomChildren = makeChain(model, splitter.bottomChain);
+            this.topChildren = makeChain(model, splitter.topChain, displayNodes, tone3000Chains);
+            this.bottomChildren = makeChain(model, splitter.bottomChain, displayNodes, tone3000Chains);
 
             this.numberOfInputs = 2;
             this.numberOfOutputs = 2;
 
+        } else if (this.displayNode) {
+            this.name = this.displayNode.name;
+            this.pluginType = this.displayNode.pluginType;
+            this.iconUrl = SelectIconUri(this.pluginType);
+            this.numberOfInputs = this.displayNode.numberOfInputs;
+            this.numberOfOutputs = this.displayNode.numberOfOutputs;
         } else if (pedalItem.isEmpty()) {
 
             this.pluginType = PluginType.None;
@@ -382,6 +442,7 @@ class PedalLayout {
         this.originalOutputs = this.numberOfOutputs;
     }
     isEmpty(): boolean {
+        if (this.displayNode) return false;
         return (!this.pedalItem) || this.pedalItem.isEmpty();
     }
     isSplitter(): boolean {
@@ -439,6 +500,9 @@ const PedalboardView =
                 frameRef: React.RefObject<HTMLDivElement | null>;
                 scrollRef: React.RefObject<HTMLDivElement | null>;
                 private bgColor: string;
+                private liveBoardSubscribed = false;
+                private displayLayout?: PedalboardDisplayLayout;
+                private reportedDisplayLayout = "";
 
                 constructor(props: PedalboardProps) {
                     super(props);
@@ -446,9 +510,9 @@ const PedalboardView =
 
                     this.bgColor = props.theme.palette.background.default
 
-                    if (!props.selectedId) props.selectedId = -1;
                     this.state = {
-                        pedalboard: this.model.pedalboard.get(),
+                        pedalboard: props.displayBoard ?? this.model.pedalboard.get(),
+                        tone3000Layouts: {},
                     };
                     this.onPedalboardChanged = this.onPedalboardChanged.bind(this);
                     this.frameRef = React.createRef();
@@ -476,7 +540,7 @@ const PedalboardView =
                 }
 
                 onDragEnd(instanceId: number, clientX: number, clientY: number) {
-                    if (!this.props.enableStructureEditing) {
+                    if (this.isReadOnly() || !this.props.enableStructureEditing) {
                         return;
                     }
                     if (!this.currentLayout) return;
@@ -629,11 +693,30 @@ const PedalboardView =
                 }
 
                 componentDidMount() {
+                    this.reportDisplayLayout();
+                    if (this.props.displayBoard) return;
                     this.scrollRef.current!.addEventListener("touchstart", this.handleTouchStart, { passive: false });
                     this.model.pedalboard.addOnChangedHandler(this.onPedalboardChanged);
+                    this.liveBoardSubscribed = true;
 
                 }
+                componentDidUpdate(previous: PedalboardProps) {
+                    this.reportDisplayLayout();
+                    if (Boolean(previous.displayBoard) === Boolean(this.props.displayBoard)) return;
+                    if (this.liveBoardSubscribed) {
+                        this.scrollRef.current!.removeEventListener("touchstart", this.handleTouchStart);
+                        this.model.pedalboard.removeOnChangedHandler(this.onPedalboardChanged);
+                        this.liveBoardSubscribed = false;
+                    }
+                    if (!this.props.displayBoard) {
+                        this.scrollRef.current!.addEventListener("touchstart", this.handleTouchStart, { passive: false });
+                        this.model.pedalboard.addOnChangedHandler(this.onPedalboardChanged);
+                        this.liveBoardSubscribed = true;
+                        this.setState({ pedalboard: this.model.pedalboard.get() });
+                    }
+                }
                 componentWillUnmount() {
+                    if (!this.liveBoardSubscribed) return;
                     this.scrollRef.current!.removeEventListener("touchstart", this.handleTouchStart);
                     this.model.pedalboard.removeOnChangedHandler(this.onPedalboardChanged);
                 }
@@ -642,6 +725,7 @@ const PedalboardView =
                     for (let i = 0; i < layoutItems.length; ++i) {
                         let layoutItem = layoutItems[i];
                         layoutItem.bounds.y += offset;
+                        if (layoutItem.connectionY !== undefined) layoutItem.connectionY += offset;
                         if (layoutItem.isSplitter()) {
                             layoutItem.topConnectorY += offset;
                             layoutItem.bottomConnectorY += offset;
@@ -728,13 +812,25 @@ const PedalboardView =
                             if (layoutItem.topChildren.length === 0) {
                                 layoutItem.topConnectorY = bounds.y + CELL_HEIGHT / 2;
                             } else {
-                                layoutItem.topConnectorY = layoutItem.topChildren[0].bounds.y + CELL_HEIGHT / 2;
+                                layoutItem.topConnectorY = layoutItem.topChildren[0].connectionY ?? layoutItem.topChildren[0].bounds.y + CELL_HEIGHT / 2;
                             }
                             if (layoutItem.bottomChildren.length === 0) {
                                 layoutItem.bottomConnectorY = bounds.y + bounds.height - CELL_HEIGHT / 2;
                             } else {
-                                layoutItem.bottomConnectorY = layoutItem.bottomChildren[0].bounds.y + CELL_HEIGHT / 2;
+                                layoutItem.bottomConnectorY = layoutItem.bottomChildren[0].connectionY ?? layoutItem.bottomChildren[0].bounds.y + CELL_HEIGHT / 2;
                             }
+                        } else if (layoutItem.tone3000Inline) {
+                            const measured = this.state.tone3000Layouts[layoutItem.pedalItem!.instanceId]
+                                ?? { width: CELL_WIDTH, height: CELL_HEIGHT + 14, inputY: 32, outputY: 32 };
+                            layoutItem.tone3000Layout = measured;
+                            layoutItem.connectionY = lp.cy + CELL_HEIGHT / 2;
+                            const footprint = tone3000ChainFootprint(lp.cx, layoutItem.connectionY, measured, CELL_WIDTH);
+                            layoutItem.bounds.x = footprint.x;
+                            layoutItem.bounds.y = footprint.y;
+                            layoutItem.bounds.width = footprint.width;
+                            layoutItem.bounds.height = footprint.height;
+                            lp.cx += measured.width;
+                            bounds.accumulate(layoutItem.bounds);
                         } else {
                             layoutItem.bounds.x = lp.cx;
                             layoutItem.bounds.y = lp.cy;
@@ -748,7 +844,7 @@ const PedalboardView =
                     return bounds;
                 }
                 doLayout(layoutItems: PedalLayout[]): LayoutSize {
-                    const TWO_ROW_HEIGHT = 142 - 14;
+                    const TWO_ROW_HEIGHT = this.props.displayBoard && this.props.omitDisplayTerminals ? 0 : 142 - 14;
 
                     if (layoutItems.length === 0) {
                         // if the current pedalboard is empty, reserve display space anyway.
@@ -776,17 +872,20 @@ const PedalboardView =
                 }
 
                 onItemClick(e: SyntheticEvent, instanceId?: number): void {
+                    if (this.isReadOnly()) return;
                     if (instanceId) {
                         this.setSelection(instanceId);
                     }
                 }
                 setSelection(instanceId: number) {
+                    if (this.isReadOnly()) return;
                     if (this.props.onSelectionChanged) {
                         this.props.onSelectionChanged(instanceId);
                     }
                 }
 
                 onItemDoubleClick(event: SyntheticEvent, instanceId?: number): void {
+                    if (this.isReadOnly()) return;
                     event.preventDefault();
                     event.stopPropagation();
 
@@ -797,6 +896,7 @@ const PedalboardView =
                 }
 
                 onItemLongClick(event: SyntheticEvent, instanceId?: number): void {
+                    if (this.isReadOnly()) return;
                     if (!instanceId) {
                         return;
                     }
@@ -836,6 +936,10 @@ const PedalboardView =
                     // const classes = withStyles.getClasses(this.props);
                     let x_ = item.bounds.x + CELL_WIDTH / 2;
                     let y_ = item.bounds.y + CELL_HEIGHT / 2;
+                    if (item.tone3000Layout) {
+                        x_ = item.bounds.right - CELL_WIDTH / 2;
+                        y_ = item.connectionY! + item.tone3000Layout.outputY - item.tone3000Layout.inputY;
+                    }
                     let numberOfOutputs = item.numberOfOutputs;
                     let color = enabled ? ENABLED_CONNECTOR_COLOR : DISABLED_CONNECTOR_COLOR;
                     let stereoCenterColor = this.bgColor;
@@ -1077,6 +1181,22 @@ const PedalboardView =
                 )
                     : ReactNode {
                     const classes = withStyles.getClasses(this.props);
+                    if (this.isReadOnly()) {
+                        const icon = <div className={hasBorder ? (instanceId === this.props.selectedId ? classes.selectedIconFrame : classes.iconFrame) : classes.borderlessIconFrame}
+                                style={{ opacity: enabled ? .99 : .3 }}>
+                                <PluginIcon pluginType={iconType} size={24} color={getIconColor(iconColor)} pluginMissing={pluginNotFound} />
+                            </div>;
+                        const display = this.props.displayNodes?.[instanceId];
+                        if (this.props.displayBoard && display?.clickable && this.props.onDisplayNodeClick) {
+                            return <ButtonBase className={classes.pedalButton} aria-label={`Open block settings: ${display.name}`}
+                                onClick={event => { event.preventDefault(); event.stopPropagation(); this.props.onDisplayNodeClick!(instanceId); }}
+                                onDoubleClick={event => { event.preventDefault(); event.stopPropagation(); }}
+                                onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }}>
+                                {icon}
+                            </ButtonBase>;
+                        }
+                        return <div className={classes.pedalButton}>{icon}</div>;
+                    }
                     let frameStyle = classes.iconFrame;
                     if (!hasBorder) {
                         frameStyle = classes.borderlessIconFrame;
@@ -1171,6 +1291,36 @@ const PedalboardView =
                         let v = it.next();
                         if (v.done) break;
                         let item = v.value;
+                        if (item.tone3000Inline && item.pedalItem) {
+                            const hostId = item.pedalItem.instanceId;
+                            const captured = item.tone3000Chain!;
+                            const emptySlots = captured.summary?.blocks.filter(block => block.type === "insert").length ?? 0;
+                            const inactiveRight = captured.summary && !captured.summary.stereoEnabled
+                                ? captured.summary.blocks.filter(block => block.lane === "right" && block.type !== "insert").length : 0;
+                            result.push(<div key={`tone3000-inline-${hostId}`}
+                                aria-label={`TONE3000 embedded chain ${hostId}`}
+                                title={`TONE3000 · ${captured.summary!.activePresetName} · ${emptySlots} empty slots omitted${inactiveRight ? ` · ${inactiveRight} right blocks inactive` : ""}`}
+                                onClick={event => this.onItemClick(event, hostId)}
+                                onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }}
+                                style={{ position: "absolute", left: item.bounds.x, top: item.bounds.y,
+                                    width: item.bounds.width, height: item.bounds.height,
+                                    opacity: item.pedalItem.isEnabled ? 1 : .4 }}>
+                                    <Tone3000ChainView summary={captured.summary!} embedded
+                                        parent={{ pluginType: item.pluginType, selected: hostId === this.props.selectedId,
+                                            onClick: () => {
+                                                this.setSelection(hostId);
+                                                this.props.onTone3000ParentClick?.();
+                                            } }}
+                                        focusedBlockId={hostId === this.props.selectedId && this.props.tone3000FocusedBlock?.instanceId === hostId
+                                            ? this.props.tone3000FocusedBlock.blockId : undefined}
+                                        onLayout={layout => this.onTone3000Layout(hostId, layout)}
+                                        onBlockClick={this.props.onTone3000BlockClick ? blockId => {
+                                            this.setSelection(hostId);
+                                            this.props.onTone3000BlockClick!(hostId, blockId);
+                                        } : undefined} />
+                            </div>);
+                            continue;
+                        }
                         switch (item.uri) {
                             case START_PEDALBOARD_ITEM_URI:
                                 result.push(<div key={this.renderKey++} className={classes.splitItem} style={{ left: item.bounds.x, top: item.bounds.y, width: item.bounds.width }} >
@@ -1208,11 +1358,11 @@ const PedalboardView =
                                                     width: CELL_WIDTH - 4, textAlign: "center", flex: "0 1 auto",
                                                     opacity: item.pedalItem?.isEnabled ?? true ? 1.0 : 0.4
                                                 }}
-                                            >{item.name}</Typography>
+                                            title={item.name}>{item.name}</Typography>
                                         </div>
                                     )
-                                    let uiPlugin = this.model.getUiPlugin(item.pedalItem?.uri ?? "");
-                                    let pluginMissing = uiPlugin === null;
+                                    let uiPlugin = item.displayNode ? null : this.model.getUiPlugin(item.pedalItem?.uri ?? "");
+                                    let pluginMissing = !item.displayNode && uiPlugin === null;
                                     let pluginType = item.pluginType;
                                     if (uiPlugin && uiPlugin.uri === "http://two-play.com/plugins/toob-nam") {
                                         pluginType = PluginType.NamPlugin;
@@ -1241,6 +1391,7 @@ const PedalboardView =
                 }
 
                 canInputStero(item: PedalLayout): boolean {
+                    if (item.displayNode) return item.displayNode.numberOfInputs === 2;
                     if (item.pedalItem) {
                         let plugin = this.model.getUiPlugin(item.pedalItem.uri);
                         if (plugin) {
@@ -1250,6 +1401,7 @@ const PedalboardView =
                     return true;
                 }
                 getNumberOfInputs(item: PedalLayout): number {
+                    if (item.displayNode) return item.displayNode.numberOfInputs;
                     if (item.pedalItem) {
                         let plugin = this.model.getUiPlugin(item.pedalItem.uri);
                         if (plugin) {
@@ -1259,6 +1411,7 @@ const PedalboardView =
                     return 1;
                 }
                 getNumberOfOutputs(item: PedalLayout): number {
+                    if (item.displayNode) return item.displayNode.numberOfOutputs;
                     if (item.pedalItem) {
                         let plugin = this.model.getUiPlugin(item.pedalItem.uri);
                         if (plugin) {
@@ -1339,11 +1492,11 @@ const PedalboardView =
                                 item.numberOfOutputs = (topOutputs >= 1 || bottomOutputs >= 1) ? 2 : 1;
                             }
                         } else if (item.isStart()) {
-                            item.numberOfOutputs = Math.min(PiPedalModelFactory.getInstance().jackSettings.get().inputAudioPorts.length, 2);
+                            item.numberOfOutputs = this.props.displayInputChannels ?? Math.min(PiPedalModelFactory.getInstance().jackSettings.get().inputAudioPorts.length, 2);
                         } else if (item.isEnd()) {
                             item.numberOfInputs =
                                 CalculateConnection(
-                                    Math.min(PiPedalModelFactory.getInstance().jackSettings.get().outputAudioPorts.length, 2),
+                                    this.props.displayOutputChannels ?? Math.min(PiPedalModelFactory.getInstance().jackSettings.get().outputAudioPorts.length, 2),
                                     numberOfInputs);
                             return item.numberOfInputs;
                         } else if (item.isEmpty()) {
@@ -1369,23 +1522,51 @@ const PedalboardView =
                 }
 
                 currentLayout?: PedalLayout[];
+                /** Local geometry only; synthetic drawing IDs never leave the child renderer.
+                 * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-OPERATE] [3.15]
+                 */
+                onTone3000Layout(hostId: number, layout: PedalboardDisplayLayout) {
+                    try { tone3000ChainFootprint(0, 0, layout, CELL_WIDTH); }
+                    catch { return; }
+                    const previous = this.state.tone3000Layouts[hostId];
+                    if (previous && previous.width === layout.width && previous.height === layout.height
+                        && previous.inputY === layout.inputY && previous.outputY === layout.outputY) return;
+                    this.setState(state => ({ tone3000Layouts: { ...state.tone3000Layouts, [hostId]: layout } }));
+                }
+                reportDisplayLayout() {
+                    if (!this.props.displayBoard || !this.props.onDisplayLayout || !this.displayLayout) return;
+                    const signature = JSON.stringify(this.displayLayout);
+                    if (signature === this.reportedDisplayLayout) return;
+                    this.reportedDisplayLayout = signature;
+                    this.props.onDisplayLayout(this.displayLayout);
+                }
+                /** A supplied display board always prevents host interactions.
+                 * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-OPERATE] [3.15]
+                 */
+                isReadOnly(): boolean { return this.props.readOnly === true || this.props.displayBoard !== undefined; }
                 private renderKey: number = 0;
                 render() {
                     const classes = withStyles.getClasses(this.props);
                     this.renderKey = 0;
-                    let layoutChain = makeChain(this.model, this.state.pedalboard?.items);
+                    let layoutChain = makeChain(this.model, (this.props.displayBoard ?? this.state.pedalboard)?.items,
+                        this.props.displayNodes, this.isReadOnly() ? undefined : this.props.tone3000Chains);
                     let start = PedalLayout.Start();
                     let end = PedalLayout.End();
                     if (layoutChain.length !== 0) {
-                        layoutChain.splice(0, 0, start);
-                        layoutChain.splice(layoutChain.length, 0, end);
-                        this.markStereoOutputs(layoutChain, 2, 2);
+                        if (!(this.props.displayBoard && this.props.omitDisplayTerminals)) {
+                            layoutChain.splice(0, 0, start);
+                            layoutChain.splice(layoutChain.length, 0, end);
+                        }
+                        this.markStereoOutputs(layoutChain, this.props.displayInputChannels ?? 2, this.props.displayOutputChannels ?? 2);
                     }
 
                     let layoutSize = this.doLayout(layoutChain);
 
 
                     this.currentLayout = layoutChain; // save for mouse processing &c.
+                    this.displayLayout = layoutChain.length ? { ...layoutSize,
+                        inputY: layoutChain[0].bounds.y + CELL_HEIGHT / 2,
+                        outputY: layoutChain[layoutChain.length - 1].bounds.y + CELL_HEIGHT / 2 } : undefined;
 
                     return (
                         <div className={classes.scrollContainer} ref={this.scrollRef}

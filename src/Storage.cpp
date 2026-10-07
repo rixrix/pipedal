@@ -1538,6 +1538,49 @@ int64_t Storage::UploadPreset(const BankFile& bankFile, int64_t uploadAfter)
     this->SaveCurrentBank();
     return lastPreset;
 }
+/**
+ * Persist only a managed TONE3000 entry; preserve active selection and IDs.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.9]
+ */
+Tone3000ImportResult Storage::SaveTone3000Preset(int64_t bankId, int64_t presetId, Pedalboard& board, int64_t instanceId)
+{
+    if (bankId < 0) {
+        auto existing = bankIndex.getEntryByName("TONE3000 Library");
+        if (existing) bankId = existing->instanceId();
+        else {
+            BankFile bank;
+            bank.name("TONE3000 Library");
+            int64_t added = bank.addPreset(board);
+            bank.selectedPreset(added);
+            if (std::filesystem::exists(GetBankFileName(bank.name())))
+                throw PiPedalStateException("Library bank file exists outside the bank index; resolve it before importing.");
+            Tone3000Library::BackupFile(dataRoot, GetIndexFileName());
+            int64_t after = bankIndex.entries().empty() ? -1 : bankIndex.entries().back().instanceId();
+            int64_t created = UploadBank(bank, after);
+            return {created, added, instanceId};
+        }
+    }
+    auto indexEntry = bankIndex.getBankIndexEntry(bankId);
+    if (!Tone3000Library::IsToneBank(indexEntry.name()))
+        throw PiPedalArgumentException("Import destination must be a TONE3000 bank.");
+    BankFile bank;
+    LoadBankFile(indexEntry.name(), &bank);
+    int64_t saved = presetId;
+    if (presetId < 0) {
+        std::string base = board.name();
+        unsigned suffix = 2;
+        while (bank.hasName(board.name())) board.name(base + " (" + std::to_string(suffix++) + ")");
+        saved = bank.addPreset(board, -1);
+    } else {
+        // Replacing the payload retains this entry's stable program position/ID.
+        bank.getItem(presetId).preset(board);
+    }
+    Tone3000Library::BackupFile(dataRoot, GetBankFileName(indexEntry.name()));
+    SaveBankFile(indexEntry.name(), bank);
+    if (bankIndex.selectedBank() == bankId) currentBank = std::move(bank);
+    return {bankId, saved, instanceId};
+}
+
 int64_t Storage::UploadBank(BankFile& bankFile, int64_t uploadAfter)
 {
     int64_t lastBank = this->bankIndex.selectedBank();

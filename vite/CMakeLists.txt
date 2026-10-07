@@ -204,6 +204,19 @@ add_custom_command(
     src/pipedal/ToobPowerStage2View.tsx
     src/pipedal/ToobWarmerView.tsx
     src/pipedal/ControlViewFactory.tsx
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-UI] [2.10]
+    src/pipedal/Tone3000View.tsx
+    src/pipedal/Tone3000BlockFocus.ts
+    src/pipedal/Tone3000PedalboardView.tsx
+    src/pipedal/Tone3000ChainView.tsx
+    src/pipedal/Tone3000ChainProjection.ts
+    src/pipedal/Tone3000Rig.ts
+    src/pipedal/Tone3000RigPanel.tsx
+    src/pipedal/Tone3000ControlLayout.ts
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.10]
+    src/pipedal/Tone3000Library.ts
+    src/pipedal/Tone3000LibraryDialog.tsx
+    src/pipedal/PatchPropertyControl.tsx
     src/pipedal/App.tsx
     src/pipedal/Rectangle.tsx
     src/pipedal/Rect.tsx

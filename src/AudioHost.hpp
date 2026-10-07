@@ -226,6 +226,8 @@ namespace pipedal
 
         //virtual bool UpdatePluginStates(Pedalboard &pedalboard) = 0;
         virtual bool UpdatePluginState(PedalboardItem &pedalboardItem) = 0;
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
+        virtual bool CapturePluginState(uint64_t instanceId, Lv2PluginState* state) = 0;
 
         virtual std::string AtomToJson(const LV2_Atom *atom) = 0;
 

@@ -47,6 +47,8 @@
 #include "AudioFiles.hpp"
 #include "CrashGuard.hpp"
 #include "Tone3000Downloader.hpp"
+#include "Tone3000Preset.hpp"
+#include "AesDigest.hpp"
 #include "HtmlHelper.hpp"
 
 #ifndef NO_MLOCK
@@ -188,7 +190,7 @@ PiPedalModel::~PiPedalModel()
         CurrentPreset currentPreset;
         currentPreset.modified_ = this->hasPresetChanged;
         currentPreset.preset_ = this->pedalboard;
-        storage.SaveCurrentPreset(currentPreset);
+        if (pendingTone3000States.empty()) storage.SaveCurrentPreset(currentPreset);
     }
     catch (...)
     {
@@ -436,6 +438,8 @@ void PiPedalModel::Load()
         }
     }
 
+    if (!hasPresetChanged) ApplyTone3000FollowDefaults(this->pedalboard);
+    RegisterTone3000Intents();
     UpdateDefaults(&this->pedalboard);
 
     std::unique_ptr<AudioHost> p{AudioHost::CreateInstance(pluginHost.asIHost())};
@@ -548,6 +552,12 @@ bool PiPedalModel::OnNotifyMaybeLv2StateChanged(uint64_t instanceId)
     {
         if (!audioHost)
         {
+            return false;
+        }
+        if (pendingTone3000States.contains(instanceId)) {
+            try { CaptureTone3000Item(instanceId); } catch (const std::exception&) { return false; }
+            // A restore notification is not a new owner edit. The intended state
+            // was already broadcast by the accepted operation/load.
             return false;
         }
         bool changed = this->audioHost->UpdatePluginState(*item);
@@ -707,6 +717,7 @@ void PiPedalModel::SetPedalboard(int64_t clientId, Pedalboard &pedalboard)
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
         this->pedalboard = pedalboard;
+        RegisterTone3000Intents();
         UpdateDefaults(&this->pedalboard);
     }
     this->FirePedalboardChanged(clientId);
@@ -718,8 +729,12 @@ void PiPedalModel::SetSnapshot(int64_t selectedSnapshot)
     bool pedalboardChanged = false;
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
-        if (this->pedalboard.ApplySnapshot(selectedSnapshot, pluginHost))
+        auto candidate=this->pedalboard.DeepCopy();
+        if (candidate.ApplySnapshot(selectedSnapshot, pluginHost))
         {
+            ApplyTone3000FollowDefaults(candidate);
+            this->pedalboard=std::move(candidate);
+            RegisterTone3000Intents();
             this->pedalboard.selectedSnapshot(selectedSnapshot);
             for (auto snapshot : this->pedalboard.snapshots())
             {
@@ -770,7 +785,7 @@ void PiPedalModel::SetSnapshots(std::vector<std::shared_ptr<Snapshot>> &snapshot
     this->SetPresetChanged(-1, true, false);
 }
 
-void PiPedalModel::UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalboard)
+void PiPedalModel::UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalboard, const std::vector<int64_t>& forceReloadIds)
 {
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -782,13 +797,14 @@ void PiPedalModel::UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalbo
 
         Lv2PedalboardErrorList errorMessages;
         std::shared_ptr<Lv2Pedalboard> lv2Pedalboard{
-            this->pluginHost.UpdateLv2PedalboardStructure(pedalboard, this->lv2Pedalboard.get(), errorMessages)};
+            this->pluginHost.UpdateLv2PedalboardStructure(pedalboard, this->lv2Pedalboard.get(), errorMessages, forceReloadIds)};
         this->lv2Pedalboard = lv2Pedalboard;
 
         // apply the error messages to the lv2Pedalboard.
         // return true if the error messages have changed
         audioHost->SetPedalboard(lv2Pedalboard);
         this->pedalboard = pedalboard;
+        RegisterTone3000Intents();
         previousPedalboard = this->pedalboard;
         previousPedalboardLoaded = true;
         this->pedalboard = pedalboard;
@@ -1006,6 +1022,7 @@ void PiPedalModel::FireLv2StateChanged(int64_t instanceId, const Lv2PluginState 
 // referesh the plugin state for all plugins.
 bool PiPedalModel::SyncLv2State()
 {
+    GuardTone3000PendingStates();
     bool changed = false;
     auto pedalboardItems = pedalboard.GetAllPlugins();
     for (PedalboardItem *item : pedalboardItems)
@@ -1047,6 +1064,9 @@ void PiPedalModel::UpdatePluginPresets(const PluginUiPresets &pluginPresets)
 }
 int64_t PiPedalModel::SavePluginPresetAs(int64_t instanceId, const std::string &name)
 {
+    std::lock_guard<std::recursive_mutex> guard{mutex};
+    GuardTone3000PendingStates();
+    SyncLv2State();
     PedalboardItem *item = this->pedalboard.GetItem(instanceId);
     if (!item)
     {
@@ -1373,9 +1393,12 @@ void PiPedalModel::LoadPreset(int64_t clientId, int64_t instanceId)
 {
     std::lock_guard<std::recursive_mutex> guard{mutex};
 
+    auto loaded = storage.GetPreset(instanceId).DeepCopy();
+    ApplyTone3000FollowDefaults(loaded);
     if (storage.LoadPreset(instanceId))
     {
-        this->pedalboard = storage.GetCurrentPreset();
+        this->pedalboard = std::move(loaded);
+        RegisterTone3000Intents();
         UpdateDefaults(&this->pedalboard);
 
         this->hasPresetChanged = false; // no fire.
@@ -1999,6 +2022,18 @@ void PiPedalModel::SendSetPatchProperty(
 
     // save the property to the preset (currently used to reconstruct snapshots only)
     PedalboardItem *pedalboardItem = this->pedalboard.GetItem(instanceId);
+    if (pedalboardItem && pedalboardItem->uri()==Tone3000Preset::PLUGIN_URI) {
+        if (pendingTone3000States.contains(instanceId)) {
+            try {CaptureTone3000Item(instanceId);} catch(const std::exception& e) {onError(e.what());return;}
+        }
+        const std::string prefix=std::string(Tone3000Preset::PLUGIN_URI)+":";
+        if (propertyUri==prefix+"calibrateInput" || propertyUri==prefix+"inputCalibrationLevel"
+            || propertyUri==prefix+"osEnabled" || propertyUri==prefix+"osFactor") {
+            pedalboardItem->tone3000FollowDefaults(false);
+            FirePedalboardChanged(clientId,false);
+            SetPresetChanged(clientId,true,false);
+        }
+    }
     if (pedalboardItem)
     {
         std::shared_ptr<Lv2PluginInfo> pluginInfo = GetPluginInfo(pedalboardItem->uri_);
@@ -2182,13 +2217,16 @@ void PiPedalModel::OpenBank(int64_t clientId, int64_t bankId)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
+    BankFile bank; storage.GetBankFile(bankId,&bank);
+    auto loaded=bank.getItem(bank.selectedPreset()).preset().DeepCopy();
+    ApplyTone3000FollowDefaults(loaded);
     storage.LoadBank(bankId);
     FireBanksChanged(clientId);
 
     FirePresetsChanged(clientId);
 
-    this->pedalboard = storage.GetCurrentPreset();
-
+    this->pedalboard = std::move(loaded);
+    RegisterTone3000Intents();
     UpdateDefaults(&this->pedalboard);
     this->hasPresetChanged = false;
     this->FirePedalboardChanged(clientId);
@@ -2242,6 +2280,7 @@ void PiPedalModel::SetJackServerSettings(const JackServerSettings &jackServerSet
     if (adminClient.CanUseShutdownClient())
     {
         // save the current (edited) preset now in case the service shutdown isn't clean.
+        GuardTone3000PendingStates();
         CurrentPreset currentPreset;
         currentPreset.modified_ = this->hasPresetChanged;
         currentPreset.preset_ = this->pedalboard;
@@ -2618,6 +2657,233 @@ void PiPedalModel::LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetIns
         }
         this->SetPresetChanged(-1, true);
     }
+}
+
+/**
+ * Discover fixed-root sources and mapped saved boards without changing audio.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.9]
+ */
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [DES-OPERATE] [3.12] */
+Tone3000DefaultsResult PiPedalModel::GetTone3000Defaults() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    return Tone3000DefaultsStore(storage.GetDataRoot(),configuration.GetTone3000PresetRoots()).Get();
+}
+Tone3000DefaultsResult PiPedalModel::SetTone3000Defaults(const Tone3000DefaultsRequest& request) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    // Staged only: neither pedalboard nor audio host is touched here.
+    return Tone3000DefaultsStore(storage.GetDataRoot(),configuration.GetTone3000PresetRoots()).Save(request);
+}
+/** Apply only on explicit clean load/startup/snapshot. Dirty recovery is unchanged.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
+ */
+void PiPedalModel::ApplyTone3000FollowDefaults(Pedalboard& board) {
+    std::optional<Tone3000ProcessingDefaults> defaults;
+    for(auto item:board.GetAllPlugins()) if(item->uri()==Tone3000Preset::PLUGIN_URI && item->tone3000FollowDefaults()) {
+        if(!defaults) defaults=GetTone3000Defaults().defaults_;
+        auto state=Tone3000Preset::EditState(item->lv2State(),Tone3000Operations::ProcessingPatch(*defaults));
+        Tone3000Library::ApplyState(*item,state,item->tone3000SourceKey(),item->tone3000SourceHash());
+    }
+}
+void PiPedalModel::RegisterTone3000Intents() {
+    pendingTone3000States.clear();
+    for(auto item:pedalboard.GetAllPlugins()) if(item->uri()==Tone3000Preset::PLUGIN_URI && item->lv2State().isValid_) {
+        // Unsupported legacy rigs retain their normal host behavior. They do not
+        // become editable through the new full-state API by this registration.
+        try {pendingTone3000States.emplace(item->instanceId(),Tone3000Preset::SummarizeState(item->lv2State()));}
+        catch(const std::exception&) {}
+    }
+}
+/** A successful state capture is separate from an unchanged state. Never replace
+ * an accepted edit with the wrapper's temporary state during asynchronous restore.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [DES-STATE] [3.12]
+ */
+PedalboardItem& PiPedalModel::CaptureTone3000Item(int64_t instanceId) {
+    auto item=pedalboard.GetItem(instanceId);
+    if(!item || item->uri()!=Tone3000Preset::PLUGIN_URI) throw PiPedalArgumentException("Choose the current TONE3000 instance.");
+    Lv2PluginState actual;
+    if(!audioHost || !audioHost->CapturePluginState(instanceId,&actual))
+        throw PiPedalStateException("Current plugin state capture failed; audio may be unavailable.");
+    auto pending=pendingTone3000States.find(instanceId);
+    if(pending!=pendingTone3000States.end()) {
+        bool matches=false;
+        try {matches=Tone3000Operations::IntentMatches(Tone3000Preset::SummarizeState(actual),pending->second);}
+        catch(const std::exception&) {}
+        if(!matches) throw PiPedalStateException("Apply accepted; plugin state has not reflected edit yet");
+        pendingTone3000States.erase(pending);
+    }
+    // The codec validates assets/routing before exposing a current summary.
+    Tone3000Preset::SummarizeState(actual);
+    if (actual!=item->lv2State()) {
+        item->lv2State(std::move(actual));
+        item->stateUpdateCount(item->stateUpdateCount()+1);
+        FireLv2StateChanged(instanceId,item->lv2State());
+        // Observation refreshes every client's cache without dirtying a clean
+        // saved load; accepted edits already use the ordinary dirty lifecycle.
+    }
+    return *item;
+}
+void PiPedalModel::GuardTone3000PendingStates() {
+    std::vector<int64_t> ids;
+    for(const auto& [id,intent]:pendingTone3000States) ids.push_back(id);
+    for(auto id:ids) {
+        auto item=pedalboard.GetItem(id);
+        if(!item || item->uri()!=Tone3000Preset::PLUGIN_URI) pendingTone3000States.erase(id);
+        else CaptureTone3000Item(id);
+    }
+}
+Tone3000CurrentStateResult PiPedalModel::GetTone3000CurrentState(const Tone3000CurrentStateRequest& request) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    auto& item=CaptureTone3000Item(request.instanceId_);
+    Tone3000CurrentStateResult result;
+    result.instanceId_=item.instanceId();result.followDefaults_=item.tone3000FollowDefaults();
+    result.summary_=Tone3000Preset::SummarizeState(item.lv2State());
+    result.revision_=Tone3000Operations::Revision(item,storage.GetBanks().selectedBank(),storage.GetCurrentPresetId());
+    result.hasSnapshotOverrides_=Tone3000Library::HasSnapshotOverrides(pedalboard,item.instanceId());
+    return result;
+}
+/** Accept a validated edit; GET subsequently confirms observed state, not DSP readiness.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-13] [FR-14] [DES-OPERATE] [3.12]
+ */
+bool PiPedalModel::SetTone3000CurrentState(int64_t clientId,const Tone3000CurrentStateEdit& request) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    auto current=GetTone3000CurrentState({request.instanceId_});
+    if(request.expectedRevision_.empty() || request.expectedRevision_!=current.revision_)
+        throw PiPedalStateException("Current rig changed; refresh before applying an edit.");
+    auto board=pedalboard.DeepCopy();auto item=board.GetItem(request.instanceId_);
+    const auto& patch=request.patch_;
+    bool hasPatch=patch.inputMode_.has_value() || patch.calibrateInput_.has_value() || patch.inputCalibrationLevel_.has_value()
+        || patch.osEnabled_.has_value() || patch.osFactor_.has_value() || !patch.blocks_.empty();
+    if(!hasPatch && !request.followDefaults_.has_value() && !request.applyDefaults_.value_or(false))
+        throw PiPedalArgumentException("Choose a rig edit or defaults policy.");
+    bool manualProcessing=patch.calibrateInput_.has_value() || patch.inputCalibrationLevel_.has_value()
+        || patch.osEnabled_.has_value() || patch.osFactor_.has_value();
+    auto state=hasPatch?Tone3000Preset::EditState(item->lv2State(),patch):item->lv2State();
+    if(manualProcessing) item->tone3000FollowDefaults(false);
+    if(request.followDefaults_) item->tone3000FollowDefaults(*request.followDefaults_);
+    bool apply=request.applyDefaults_.value_or(false) || request.followDefaults_.value_or(false);
+    if(apply) state=Tone3000Preset::EditState(state,Tone3000Operations::ProcessingPatch(GetTone3000Defaults().defaults_));
+    auto intended=Tone3000Preset::SummarizeState(state);
+    Tone3000Library::ApplyState(*item,state,item->tone3000SourceKey(),item->tone3000SourceHash());
+    UpdateCurrentPedalboard(clientId,board,(hasPatch || apply)?std::vector<int64_t>{request.instanceId_}:std::vector<int64_t>{});
+    pendingTone3000States[request.instanceId_]=std::move(intended);
+    return true;
+}
+
+Tone3000LibraryResult PiPedalModel::GetTone3000Library()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    Tone3000Library library(storage.GetDataRoot(), configuration.GetTone3000PresetRoots());
+    Tone3000LibraryResult result;
+    auto sources=library.Scan(&result.warnings_);
+    std::map<std::string,size_t> sourceIndexes;
+    for (size_t i=0;i<sources.size();++i) {
+        sourceIndexes[sources[i].entry.key_]=i;
+        for (const auto& alias: sources[i].aliases) sourceIndexes[alias]=i;
+    }
+    // Decode each saved bank only once; full T3K states contain large model blobs.
+    for (const auto& bankEntry: storage.GetBanks().entries()) {
+            if (!Tone3000Library::IsToneBank(bankEntry.name())) continue;
+            try {
+                BankFile bank; storage.GetBankFile(bankEntry.instanceId(),&bank);
+                for (const auto& preset: bank.presets()) {
+                    auto board=preset->preset();
+                    for (const auto* item: board.GetAllPlugins()) {
+                        if (item->uri()!=Tone3000Preset::PLUGIN_URI) continue;
+                        const auto& key=item->tone3000SourceKey();
+                        auto found=sourceIndexes.find(key);
+                        if (found==sourceIndexes.end()) continue;
+                        sources[found->second].entry.imports_.push_back({bankEntry.instanceId(),preset->instanceId(),item->instanceId(),
+                            board.name(),item->tone3000SourceHash(),
+                            storage.GetBanks().selectedBank()==bankEntry.instanceId() && storage.GetCurrentPresetId()==preset->instanceId(),
+                            Tone3000Library::HasSnapshotOverrides(board,item->instanceId())});
+                    }
+                }
+            } catch (const std::exception&) { result.warnings_.push_back("A TONE3000 bank could not be inspected; its imports are unavailable."); }
+    }
+    for (auto& source: sources) result.entries_.push_back(std::move(source.entry));
+    return result;
+}
+
+/**
+ * Add or update one saved item with source/target guards and retained backups.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [DES-SEC] [3.9]
+ */
+Tone3000ImportResult PiPedalModel::ImportTone3000Preset(int64_t clientId,const Tone3000ImportRequest& request) try
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    bool add=request.bankId_<0 && request.presetId_<0 && request.instanceId_<0;
+    if ((!add && (request.bankId_<0 || request.presetId_<0 || request.instanceId_<0)) || (!add && request.asNew_))
+        throw PiPedalArgumentException("Choose Add or one exact imported preset target.");
+    if (!pluginHost.GetPluginInfo(Tone3000Preset::PLUGIN_URI))
+        throw PiPedalStateException("The TONE3000 plugin must be installed before importing a rig.");
+    Tone3000Library library(storage.GetDataRoot(),configuration.GetTone3000PresetRoots());
+    auto source=library.Resolve(request.key_,request.sha256_);
+    auto bytes=Tone3000Library::ReadFile(source.path);
+    if (AesDigest(std::string(reinterpret_cast<const char*>(bytes.data()),bytes.size()))!=request.sha256_)
+        throw PiPedalStateException("Source preset changed; refresh and retry.");
+    if (add && !request.asNew_) {
+        auto available=GetTone3000Library();
+        for (const auto& entry: available.entries_) if (entry.key_==source.entry.key_)
+            for (const auto& mapped: entry.imports_) if (mapped.sha256_==request.sha256_)
+                return {mapped.bankId_,mapped.presetId_,mapped.instanceId_};
+    }
+    Pedalboard board;
+    PedalboardItem* item=nullptr;
+    bool active=false;
+    if (add) {
+        board.name(source.entry.name_);
+        auto newItem=board.MakeEmptyItem(); newItem.uri(Tone3000Preset::PLUGIN_URI); newItem.pluginName("TONE3000");
+        newItem.tone3000FollowDefaults(true);
+        board.items().push_back(std::move(newItem));
+        item=&board.items().front(); board.selectedPlugin(item->instanceId());
+    } else {
+        const auto& index=storage.GetBanks().getBankIndexEntry(request.bankId_);
+        if (!Tone3000Library::IsToneBank(index.name())) throw PiPedalArgumentException("Update target must be a TONE3000 bank.");
+        BankFile bank; storage.GetBankFile(request.bankId_,&bank);
+        board=bank.getItem(request.presetId_).preset().DeepCopy();
+        item=board.GetItem(request.instanceId_);
+        if (!item || item->uri()!=Tone3000Preset::PLUGIN_URI
+            || (item->tone3000SourceKey()!=request.key_ && item->tone3000SourceKey()!=source.entry.key_
+                && std::find(source.aliases.begin(),source.aliases.end(),item->tone3000SourceKey())==source.aliases.end())
+            || item->tone3000SourceHash().empty() || item->tone3000SourceHash()!=request.expectedImportSha256_)
+            throw PiPedalStateException("Imported target changed or is not mapped to this source; refresh before updating.");
+        active=storage.GetBanks().selectedBank()==request.bankId_ && storage.GetCurrentPresetId()==request.presetId_;
+        if (active && hasPresetChanged) throw PiPedalStateException("Save or discard the active rig's unsaved changes before Update & load.");
+    }
+    auto state=Tone3000Preset::BuildState(bytes,source.path.filename().string(),source.section,add?nullptr:&item->lv2State());
+    if (add) state=Tone3000Preset::EditState(state,Tone3000Operations::ProcessingPatch(GetTone3000Defaults().defaults_));
+    Tone3000Library::ApplyState(*item,state,source.entry.key_,request.sha256_);
+    auto result=storage.SaveTone3000Preset(add?-1:request.bankId_,add?-1:request.presetId_,board,item->instanceId());
+    FireBanksChanged(clientId);
+    FirePresetsChanged(clientId);
+    // Only this explicit clean-active Update action changes running audio.
+    if (active) LoadPreset(clientId,result.presetId_);
+    return result;
+} catch (const fs::filesystem_error&) {
+    throw PiPedalStateException("Preset storage is unavailable; inspect the retained backup and refresh before retrying.");
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+void PiPedalModel::LoadTone3000Preset(int64_t clientId,const Tone3000LoadRequest& request)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    const auto& index=storage.GetBanks().getBankIndexEntry(request.bankId_);
+    if (!Tone3000Library::IsToneBank(index.name())) throw PiPedalArgumentException("Choose a TONE3000 bank entry.");
+    BankFile bank; storage.GetBankFile(request.bankId_,&bank);
+    auto board=bank.getItem(request.presetId_).preset();
+    auto items=board.GetAllPlugins();
+    if (std::none_of(items.begin(),items.end(),[](const PedalboardItem* item){return item->uri()==Tone3000Preset::PLUGIN_URI;}))
+        throw PiPedalArgumentException("Saved entry does not contain TONE3000.");
+    if (storage.GetBanks().selectedBank()!=request.bankId_) OpenBank(clientId,request.bankId_);
+    LoadPreset(clientId,request.presetId_);
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+Tone3000LibraryEntry PiPedalModel::UploadTone3000Preset(const std::string& filename,const fs::path& temporary)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    Tone3000Library library(storage.GetDataRoot(),configuration.GetTone3000PresetRoots());
+    return library.Upload(filename,temporary);
 }
 
 void PiPedalModel::DeleteAtomOutputListeners(int64_t clientId)
@@ -3092,6 +3358,7 @@ void PiPedalModel::SetSelectedPedalboardPlugin(uint64_t clientId, uint64_t pedal
 
 bool PiPedalModel::LoadCurrentPedalboard()
 {
+    RegisterTone3000Intents();
     CrashGuardLock crashGuardLock;
     if (previousPedalboardLoaded && pedalboard.IsStructureIdentical(previousPedalboard))
     {

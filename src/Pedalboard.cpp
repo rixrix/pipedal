@@ -324,7 +324,7 @@ void PedalboardItem::ApplySnapshotValue(SnapshotValue*snapshotValue)
 }
 
 
-// can we just send a snapshot-style uddate instead of reloading plugins? All settings are ignored.
+// Numeric controls and bypass can use snapshots; changed opaque state requires a rebuild.
 bool Pedalboard::IsStructureIdentical(const Pedalboard &other) const
 {
     if (this->nextInstanceId_ != other.nextInstanceId_) // quick check that catches 95% of structural changes.
@@ -359,6 +359,15 @@ bool PedalboardItem::IsStructurallyIdentical(const PedalboardItem&other) const
     {
         return false;
     }
+    // State restore must stay off the audio thread. Compare values rather than
+    // stateUpdateCount, which may coincide in independently saved presets.
+    if (this->lv2State() != other.lv2State()
+        || this->lilvPresetUri() != other.lilvPresetUri()
+        || this->vstState() != other.vstState()
+        || this->pathProperties() != other.pathProperties())
+    {
+        return false;
+    }
     if (this->isSplit()) // so is the other by virtue of idential uris.
     {
 
@@ -387,12 +396,13 @@ bool PedalboardItem::IsStructurallyIdentical(const PedalboardItem&other) const
         }
         if (bottomChain().size() != other.bottomChain().size())
         {
-            for (size_t i = 0; i < bottomChain().size(); ++i)
+            return false;
+        }
+        for (size_t i = 0; i < bottomChain().size(); ++i)
+        {
+            if (!bottomChain()[i].IsStructurallyIdentical(other.bottomChain()[i]))
             {
-                if (!bottomChain()[i].IsStructurallyIdentical(other.bottomChain()[i]))
-                {
-                    return false;
-                }
+                return false;
             }
         }
     }
@@ -541,6 +551,10 @@ JSON_MAP_BEGIN(PedalboardItem)
     JSON_MAP_REFERENCE(PedalboardItem,useModUi)
     JSON_MAP_REFERENCE(PedalboardItem,iconColor)
     JSON_MAP_REFERENCE(PedalboardItem,sideChainInputId)
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9]
+    JSON_MAP_REFERENCE(PedalboardItem,tone3000SourceKey)
+    JSON_MAP_REFERENCE(PedalboardItem,tone3000SourceHash)
+    JSON_MAP_REFERENCE(PedalboardItem,tone3000FollowDefaults)
 JSON_MAP_END()
 
 
@@ -569,5 +583,4 @@ JSON_MAP_BEGIN(Snapshot)
     JSON_MAP_REFERENCE(Snapshot,color)
     JSON_MAP_REFERENCE(Snapshot,values)
 JSON_MAP_END()
-
 

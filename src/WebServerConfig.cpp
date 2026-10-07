@@ -309,6 +309,9 @@ public:
         }
         std::string segment = request_uri.segment(1);
 
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9]
+        if (segment == "uploadTone3000Preset") return method == HttpVerb::post;
+
         if (segment == "t3k_uploadAsset")
         {
             return true;
@@ -1113,7 +1116,30 @@ public:
         {
             std::string segment = request_uri.segment(1);
 
-            if (segment == "t3k_uploadAsset")
+            // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [DES-SEC] [3.9]
+            if (segment == "uploadTone3000Preset")
+            {
+                std::stringstream response;
+                json_writer writer(response);
+                try {
+                    if (req.content_length()>64*1024*1024)
+                        throw PiPedalArgumentException("Preset upload exceeds the 64 MiB input bound.");
+                    auto filename=request_uri.query("filename");
+                    auto temporary=req.get_body_temporary_file();
+                    if (temporary.empty()) throw PiPedalArgumentException("Missing preset upload body.");
+                    auto entry=model->UploadTone3000Preset(filename,temporary);
+                    writer.write(entry);
+                } catch (const std::exception& error) {
+                    res.setStatus(400);
+                    writer.start_object(); writer.write_member("error",std::string(error.what())); writer.end_object();
+                }
+                auto body=response.str();
+                res.set(HttpField::content_type,"application/json");
+                res.set(HttpField::cache_control,"no-cache");
+                res.setContentLength(body.size()); res.setBody(body);
+                return;
+            }
+            else if (segment == "t3k_uploadAsset")
             {
                 std::string responseText;
                 try

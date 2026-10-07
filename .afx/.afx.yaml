@@ -1,0 +1,63 @@
+# AFX Project Configuration Template
+# Copy this file to .afx.yaml in your project root and customize.
+# See: docs/agenticflowx/agenticflowx.md
+
+# AFX version — controls which branch/tag afx-cli and pack index are fetched from.
+# Accepts: semver (e.g. '1.5.3' → tag v1.5.3), branch name, or 'main'.
+version: 'main'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────────────────────
+paths:
+  specs: 'docs/specs'                    # Root directory for all specs
+  adr: 'docs/adr'                        # Global architecture decision records
+
+# Active features (used by /afx-report, /afx-next)
+# Add your feature folder names here. Use /afx-scaffold to scaffold a new feature.
+features: []
+  # - my-feature                         # Example: uncomment and rename
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Library (Upstream Artifacts) - Optional
+# ─────────────────────────────────────────────────────────────────────────────
+library:
+  docs: 'docs/agenticflowx'             # AFX framework documentation
+  research: 'docs/research'             # Global exploration & knowledge
+  architecture: 'docs/architecture'    # System constraints & patterns
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature Prefixes (for discussion IDs)
+# ─────────────────────────────────────────────────────────────────────────────
+# Add your feature prefixes here. Used by /afx-session for discussion IDs.
+# Format: feature-folder: PREFIX (2-3 letters, uppercase)
+prefixes:
+  specs: GEN                             # General cross-cutting discussions
+  # my-feature: MF                       # Example: add prefix per feature
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Packs — Managed by afx-cli, do not edit manually
+# ─────────────────────────────────────────────────────────────────────────────
+# Packs are installed and removed via afx-cli.
+# Example:
+#   packs:
+#     - name: afx-pack-qa
+#       installed_ref: main
+#       installed_at: 2026-03-14T10:00:00.000Z
+packs: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Skills — Managed by afx-cli, do not edit manually
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-skill entries with provider toggles. Managed by pack install/remove.
+# Example:
+#   skills:
+#     - name: afx-qa-methodology
+#       category: qa
+#       source: afx-pack-qa
+#       item_type: afx
+#       providers:
+#         agents: true
+#         antigravity: true
+#         copilot: true
+skills: []

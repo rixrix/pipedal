@@ -37,6 +37,7 @@
 #include <mutex>
 #include "Tone3000Downloader.hpp"
 #include "Tone3000Tone.hpp"
+#include "Tone3000Operations.hpp"
 
 #include "AdminClient.hpp"
 #include "WifiConfigSettings.hpp"
@@ -1353,6 +1354,56 @@ public:
         this->Reply(replyTo, "getWifiChannels", channels);
     }
     REGISTER_MESSAGE_HANDLER(getWifiChannels)
+
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [DES-SEC] [3.12]
+    template<class T> T ReadTone3000Operation(json_reader* reader,const std::string& name) {
+        json_variant raw=Tone3000Operations::ReadRequestJson(*reader);
+        Tone3000Operations::ValidateRequestJson(raw,name);
+        std::istringstream stream(raw.to_string());json_reader checked(stream);T result;checked.read(&result);return result;
+    }
+    void handle_getTone3000Defaults(int replyTo,json_reader*) {
+        Reply(replyTo,"getTone3000Defaults",model.GetTone3000Defaults());
+    }
+    REGISTER_MESSAGE_HANDLER(getTone3000Defaults)
+    void handle_setTone3000Defaults(int replyTo,json_reader* reader) {
+        auto request=ReadTone3000Operation<Tone3000DefaultsRequest>(reader,"setTone3000Defaults");
+        Reply(replyTo,"setTone3000Defaults",model.SetTone3000Defaults(request));
+    }
+    REGISTER_MESSAGE_HANDLER(setTone3000Defaults)
+    void handle_getTone3000CurrentState(int replyTo,json_reader* reader) {
+        auto request=ReadTone3000Operation<Tone3000CurrentStateRequest>(reader,"getTone3000CurrentState");
+        Reply(replyTo,"getTone3000CurrentState",model.GetTone3000CurrentState(request));
+    }
+    REGISTER_MESSAGE_HANDLER(getTone3000CurrentState)
+    void handle_setTone3000CurrentState(int replyTo,json_reader* reader) {
+        auto request=ReadTone3000Operation<Tone3000CurrentStateEdit>(reader,"setTone3000CurrentState");
+        Reply(replyTo,"setTone3000CurrentState",model.SetTone3000CurrentState(clientId,request));
+    }
+    REGISTER_MESSAGE_HANDLER(setTone3000CurrentState)
+
+    void handle_getTone3000Library(int replyTo, json_reader *pReader)
+    {
+        this->Reply(replyTo,"getTone3000Library",model.GetTone3000Library());
+    }
+    REGISTER_MESSAGE_HANDLER(getTone3000Library)
+
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+    void handle_importTone3000Preset(int replyTo,json_reader* pReader)
+    {
+        Tone3000ImportRequest request; pReader->read(&request);
+        this->Reply(replyTo,"importTone3000Preset",model.ImportTone3000Preset(clientId,request));
+    }
+    REGISTER_MESSAGE_HANDLER(importTone3000Preset)
+
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+    void handle_loadTone3000Preset(int replyTo,json_reader* pReader)
+    {
+        Tone3000LoadRequest request; pReader->read(&request);
+        model.LoadTone3000Preset(clientId,request);
+        this->Reply(replyTo,"loadTone3000Preset",true);
+    }
+    REGISTER_MESSAGE_HANDLER(loadTone3000Preset)
 
     void handle_getPluginPresets(int replyTo, json_reader *pReader)
     {

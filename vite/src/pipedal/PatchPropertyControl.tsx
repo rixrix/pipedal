@@ -9,11 +9,20 @@ import PluginControl from "./PluginControl";
 interface PatchPropertyControlProps {
     instanceId: number;
     property: Lv2PatchPropertyInfo;
+    displayLabel?: string;
 }
 
+/**
+ * Optional presentation names retain the property's discovered numeric contract.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-UI] [2.10]
+ */
 export default function PatchPropertyControl(props: PatchPropertyControlProps) {
     const model = PiPedalModelFactory.getInstance();
-    const uiControl = useMemo(() => props.property.toUiControl(), [props.property]);
+    const uiControl = useMemo(() => {
+        const control = props.property.toUiControl();
+        if (props.displayLabel) control.name = props.displayLabel;
+        return control;
+    }, [props.property, props.displayLabel]);
     const [value, setValue] = useState(uiControl.default_value);
 
     useEffect(() => {

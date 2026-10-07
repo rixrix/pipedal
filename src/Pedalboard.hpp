@@ -102,6 +102,13 @@ namespace pipedal
         bool useModUi_ = false;
         std::string iconColor_;
         int64_t sideChainInputId_ = -1;
+        // Optional import provenance survives ordinary controls/save/copy operations.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9]
+        std::string tone3000SourceKey_;
+        std::string tone3000SourceHash_;
+        // Missing/old metadata keeps saved processing overrides.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
+        bool tone3000FollowDefaults_ = false;
 
         // non persistent state.
         PropertyMap patchProperties;
@@ -111,6 +118,10 @@ namespace pipedal
         const ControlValue *GetControlValue(const std::string &symbol) const;
         bool SetControlValue(const std::string &key, float value);
 
+        /**
+         * Compare structure and state that cannot be restored by a realtime snapshot.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-2] [FR-3] [DES-RELOAD] [1.8]
+         */
         bool IsStructurallyIdentical(const PedalboardItem &other) const;
 
         void ApplySnapshotValue(SnapshotValue *snapshotValue);
@@ -136,6 +147,9 @@ namespace pipedal
         GETTER_SETTER_REF(iconColor)
         GETTER_SETTER(useModUi)
         GETTER_SETTER(sideChainInputId)
+        GETTER_SETTER_REF(tone3000SourceKey)
+        GETTER_SETTER_REF(tone3000SourceHash)
+        GETTER_SETTER(tone3000FollowDefaults)
 
         Lv2PluginState &lv2State() { return lv2State_; } // non-const version.
         GETTER_SETTER_REF(lilvPresetUri)
@@ -253,7 +267,11 @@ namespace pipedal
         bool SetItemUseModUi(int64_t pedalItemId, bool enabled);
         void SetCurrentSnapshotModified(bool modified);
 
-        bool IsStructureIdentical(const Pedalboard &other) const; // caan we just send a snapshot-style uddate instead of reloading plugins? All settings are ignored.
+        /**
+         * Return whether a snapshot can update the running board without restoring plugin state.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-2] [FR-3] [DES-RELOAD] [1.8]
+         */
+        bool IsStructureIdentical(const Pedalboard &other) const;
         Snapshot MakeSnapshotFromCurrentSettings(const Pedalboard &previousPedalboard);
 
         PedalboardItem *GetItem(int64_t pedalItemId);

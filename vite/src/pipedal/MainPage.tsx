@@ -36,7 +36,7 @@ import LoadPluginDialog from './LoadPluginDialog';
 import Switch from '@mui/material/Switch';
 import Typography from '@mui/material/Typography';
 
-import PedalboardView from './PedalboardView';
+import PedalboardView from './Tone3000PedalboardView';
 import { PiPedalStateError } from './PiPedalError';
 import AddIcon from '@mui/icons-material/Add';
 import Menu from '@mui/material/Menu';

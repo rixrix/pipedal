@@ -1099,7 +1099,7 @@ namespace pipedal
                                 ServerError(*con, ec.message());
                                 return;
                             }
-                            con->set_status(websocketpp::http::status_code::ok);
+                            con->set_status(static_cast<websocketpp::http::status_code::value>(res.status()));
                             return;
                         }
                         else if (req.method() == HttpVerb::get)
@@ -1122,7 +1122,7 @@ namespace pipedal
                                 ServerError(*con, ec.message());
                                 return;
                             }
-                            con->set_status(websocketpp::http::status_code::ok);
+                            con->set_status(static_cast<websocketpp::http::status_code::value>(res.status()));
                             return;
                         }
                         else if (req.method() == HttpVerb::post)
@@ -1145,7 +1145,7 @@ namespace pipedal
                                 ServerError(*con, ec.message());
                                 return;
                             }
-                            con->set_status(websocketpp::http::status_code::ok);
+                            con->set_status(static_cast<websocketpp::http::status_code::value>(res.status()));
 
                             return;
                         }

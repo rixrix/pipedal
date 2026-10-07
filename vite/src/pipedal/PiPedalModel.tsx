@@ -29,6 +29,8 @@ import ScreenOrientation from './ScreenOrientation';
 import PiPedalSocket, { PiPedalMessageHeader } from './PiPedalSocket';
 import { Tone3000DownloadHandler } from './Tone3000Downloader';
 import Tone3000DownloadType from './Tone3000DownloadType';
+import type { Tone3000Import, Tone3000ImportResult, Tone3000LibraryEntry, Tone3000LibraryResult } from './Tone3000Library';
+import type { Tone3000CurrentState, Tone3000Defaults, Tone3000DefaultsResult, Tone3000StatePatch } from './Tone3000Rig';
 import { nullCast } from './Utility'
 import { JackConfiguration, JackChannelSelection } from './Jack';
 import { BankIndex } from './Banks';
@@ -3893,6 +3895,76 @@ export class PiPedalModel //implements PiPedalModel
         this.webSocket?.send("setSelectedPedalboardPlugin", { clientId: this.clientId, pluginInstanceId: pluginId });
 
     }
+    /** Discover complete rigs saved by the local TONE3000 app.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.10]
+     */
+    getTone3000Library(): Promise<Tone3000LibraryResult> {
+        return nullCast(this.webSocket).request<Tone3000LibraryResult>("getTone3000Library");
+    }
+
+    /** Add or explicitly update an identified saved rig, with source guards.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.10]
+     */
+    importTone3000Preset(entry: Tone3000LibraryEntry, target?: Tone3000Import, asNew = false): Promise<Tone3000ImportResult> {
+        return nullCast(this.webSocket).request<Tone3000ImportResult>("importTone3000Preset", {
+            key: entry.key, sha256: entry.sha256, asNew,
+            bankId: target?.bankId ?? -1, presetId: target?.presetId ?? -1,
+            instanceId: target?.instanceId ?? -1, expectedImportSha256: target?.sha256 ?? ""
+        });
+    }
+
+    /** Load through the host's normal saved-bank/preset lifecycle.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.10]
+     */
+    loadTone3000Preset(bankId: number, presetId: number): Promise<void> {
+        return nullCast(this.webSocket).request<void>("loadTone3000Preset", { bankId, presetId });
+    }
+
+    /** Upload a complete rig to the server's validated, fixed preset store.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.10]
+     */
+    async uploadTone3000Preset(file: File): Promise<Tone3000LibraryEntry> {
+        if (!file.name.toLowerCase().endsWith(".t3kpreset")) {
+            throw new Error("Choose a complete .t3kpreset rig. Save NAM models and IRs as a preset in TONE3000 first.");
+        }
+        if (file.size === 0 || file.size > 64 * 1024 * 1024) throw new Error("Preset files must be between 1 byte and 64 MiB.");
+        const response = await fetch(this.varServerUrl + "uploadTone3000Preset?filename=" + encodeURIComponent(file.name), {
+            method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" }
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "Preset upload failed.");
+        return result as Tone3000LibraryEntry;
+    }
+
+    /** Read staged processing profiles without changing playing audio.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [DES-OPERATE] [3.13]
+     */
+    getTone3000Defaults(): Promise<Tone3000DefaultsResult> {
+        return nullCast(this.webSocket).request<Tone3000DefaultsResult>("getTone3000Defaults");
+    }
+
+    /** Atomically save the selected device profile using its source revision.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [DES-OPERATE] [3.13]
+     */
+    setTone3000Defaults(expectedRevision: string, activeProfile: string, defaults: Tone3000Defaults): Promise<Tone3000DefaultsResult> {
+        return nullCast(this.webSocket).request<Tone3000DefaultsResult>("setTone3000Defaults", { expectedRevision, activeProfile, defaults });
+    }
+
+    /** Fetch a fresh bounded projection of the actual plugin state.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-13] [DES-OPERATE] [3.13]
+     */
+    getTone3000CurrentState(instanceId: number): Promise<Tone3000CurrentState> {
+        return nullCast(this.webSocket).request<Tone3000CurrentState>("getTone3000CurrentState", { instanceId });
+    }
+
+    /** Explicitly apply guarded changes to the playing rig; normal Save persists them.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [FR-13] [DES-OPERATE] [3.13]
+     */
+    setTone3000CurrentState(instanceId: number, expectedRevision: string, patch: Tone3000StatePatch,
+        policy: { followDefaults?: boolean; applyDefaults?: boolean } = {}): Promise<boolean> {
+        return nullCast(this.webSocket).request<boolean>("setTone3000CurrentState", { instanceId, expectedRevision, patch, ...policy });
+    }
+
     requestBankPresets(bankInstanceId: number): Promise<PresetIndexEntry[]> {
         return nullCast(this.webSocket).request<PresetIndexEntry[]>("requestBankPresets", { bankInstanceId: bankInstanceId });
     }
@@ -4032,6 +4104,3 @@ export class PiPedalModelFactory {
 
     }
 };
-
-
-

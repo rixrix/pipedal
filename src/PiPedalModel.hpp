@@ -45,6 +45,7 @@
 #include "Tone3000Downloader.hpp"
 #include "Uri.hpp"
 #include "Tone3000Tone.hpp"
+#include "Tone3000Operations.hpp"
 
 namespace pipedal
 {
@@ -250,6 +251,12 @@ namespace pipedal
         IPiPedalModelSubscriber *GetNotificationSubscriber(int64_t clientId);
         std::atomic<bool> closed = false;
         bool SyncLv2State();
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
+        std::map<int64_t,Tone3000StateSummary> pendingTone3000States;
+        void ApplyTone3000FollowDefaults(Pedalboard& board);
+        void RegisterTone3000Intents();
+        void GuardTone3000PendingStates();
+        PedalboardItem& CaptureTone3000Item(int64_t instanceId);
 
     private: // IAudioHostCallbacks
         virtual void OnNotifyLv2StateChanged(uint64_t instanceId) override;
@@ -378,12 +385,26 @@ namespace pipedal
         Pedalboard GetCurrentPedalboardCopy()
         {
             std::lock_guard<std::recursive_mutex> guard(mutex);
+            GuardTone3000PendingStates();
             return pedalboard; // can return a referece because we'd lose  mutex protection
         }
         PluginUiPresets GetPluginUiPresets(const std::string &pluginUri);
         PluginPresets GetPluginPresets(const std::string &pluginUri);
 
         void LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetInstanceId);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+        Tone3000LibraryResult GetTone3000Library();
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
+        Tone3000DefaultsResult GetTone3000Defaults();
+        Tone3000DefaultsResult SetTone3000Defaults(const Tone3000DefaultsRequest& request);
+        Tone3000CurrentStateResult GetTone3000CurrentState(const Tone3000CurrentStateRequest& request);
+        bool SetTone3000CurrentState(int64_t clientId,const Tone3000CurrentStateEdit& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+        Tone3000ImportResult ImportTone3000Preset(int64_t clientId, const Tone3000ImportRequest& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+        void LoadTone3000Preset(int64_t clientId, const Tone3000LoadRequest& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+        Tone3000LibraryEntry UploadTone3000Preset(const std::string& filename, const std::filesystem::path& temporary);
 
         void AddNotificationSubscription(std::shared_ptr<IPiPedalModelSubscriber> pSubscriber);
         void RemoveNotificationSubsription(std::shared_ptr<IPiPedalModelSubscriber> pSubscriber);
@@ -402,7 +423,7 @@ namespace pipedal
         Pedalboard &GetPedalboard();
         std::shared_ptr<Lv2Pedalboard> GetLv2Pedalboard();
 
-        void UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalboard);
+        void UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalboard, const std::vector<int64_t>& forceReloadIds = {});
 
         void SetSnapshots(std::vector<std::shared_ptr<Snapshot>> &snapshots, int64_t selectedSnapshot);
         void SetSnapshot(int64_t selectedSnapshot);

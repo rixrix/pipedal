@@ -198,5 +198,6 @@
     "cSpell.enabledFileTypes": {
         "markdown": true
     },
+    "afx.pi.projectTrust": "trust",
     
 }

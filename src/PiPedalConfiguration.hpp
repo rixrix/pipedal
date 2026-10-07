@@ -46,6 +46,7 @@ private:
     int logLevel_ = 0;
     uint64_t maxUploadSize_ = 1024*1024;
     bool tone3000A2Models_ = true;
+    std::vector<std::string> tone3000PresetRoots_;
     std::string accessPointGateway_;
     std::string accessPointServerAddress_;
     bool isVst3Enabled_ = true;
@@ -69,6 +70,8 @@ public:
     uint64_t GetMaxUploadSize() const { return maxUploadSize_; }
 
     bool GetTone3000A2Models() const { return tone3000A2Models_; }
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+    const std::vector<std::string>& GetTone3000PresetRoots() const { return tone3000PresetRoots_; }
     LogLevel GetLogLevel() const { return (LogLevel)this->logLevel_; }
 
     bool LogHttpRequests() const { return this->logHttpRequests_; }
