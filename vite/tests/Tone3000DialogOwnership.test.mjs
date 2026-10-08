@@ -1,3 +1,4 @@
+import { Tone3000MixMatchSession } from "../src/pipedal/Tone3000MixMatch.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -34,7 +35,7 @@ function fixture(kind) {
     measurements.add({ state: "done", token: 7, valid: true, receiptValid: true, finite: true, clipped: false,
         silent: false, rmsDb: -24, peakDb: -12, seconds: 3, samples: 144000, savedRevision: "a".repeat(64),
         bankId: 6, presetId: 20, instanceId: 1 }, "Measured rig");
-    const context = { console, State: { Ready: 1, Reconnecting: 2 }, Tone3000ProgramEvidence,
+    const context = { console, Tone3000MixMatchSession, State: { Ready: 1, Reconnecting: 2 }, Tone3000ProgramEvidence,
         Tone3000BundleReader, tone3000BundleImportAllowed, tone3000BundleMaxBytes,
         Tone3000StageRunner, tone3000ValidMeasurement, tone3000QuietestTarget, tone3000LevelProposalAllowed,
         tone3000StageBlockName, tone3000StageRequestedSize, tone3000StageCalibration, tone3000DraftNumber, tone3000BankLocation, tone3000FilterLibrary,
@@ -65,12 +66,17 @@ function fixture(kind) {
     compile(observable.getText(observableAst).replace(/^export /, "") + "\nglobalThis.ObservableProperty = ObservableProperty;");
     const sources = Array.from({ length: 4 }, (_, i) => ({ bankId: 6, presetId: i + 20, name: "Rig " + i, bankName: "TONE3000 Rx", revision: "saved" }));
     const model = {
+        pedalboard: new context.ObservableProperty({ tryGetItem: () => ({}) }),
+        selectedSnapshot: new context.ObservableProperty(-1),
         state: new context.ObservableProperty(context.State.Ready),
         presets: new context.ObservableProperty({ presetChanged: false, selectedInstanceId: 20, presets: [] }),
         banks: new context.ObservableProperty({ selectedBank: 6 }),
         alsaSequencerConfiguration: new context.ObservableProperty({ midiChannel: 0 }),
         showAlert: message => alerts.push(message),
         getTone3000PerformanceSources: async () => { reads.push("sources"); return sources; },
+        getTone3000PresetPreview: async () => ({ targetState: { summary: { blocks: [{ type: "nam", blockId: "amp" }, { type: "ir", blockId: "cab" }] } } }),
+        getTone3000MixMatchPreview: async request => ({ sourceRevision: request.expectedRevision, name: request.name, sourceName: "Rig 0", ampBlockId: "amp", cabBlockId: "cab", includePitch: request.includePitch, qualified: false, warnings: [], items: [] }),
+        createTone3000MixMatch: (...args) => { const pending = deferred(); writes.push({ args, pending }); return pending.promise; },
         getTone3000Library: async () => { reads.push("library"); return { entries: [], warnings: [] }; },
         createTone3000PerformanceBank: (...args) => { const pending = deferred(); writes.push({ args, pending }); return pending.promise; },
         loadTone3000Preset: (...args) => { const pending = deferred(); writes.push({ args, pending }); return pending.promise; },
@@ -95,8 +101,9 @@ function fixture(kind) {
     }
     const component = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     compile(component.getText(ast).replace(/^export default /, "") + "\nglobalThis.renderComponent = " + name + ";");
+    const selection = { entry: { key: "user:source", sha256: "sourcehash" }, target: { bankId: 6, presetId: 20, instanceId: 1, name: "Rig 0" } };
     const render = () => {
-        cursor = 0; tree = context.renderComponent({ open, active: open, instanceId: 1, onClose: () => { ++closes; } });
+        cursor = 0; tree = context.renderComponent({ selection: open ? selection : null, open, active: open, instanceId: 1, onClose: () => { ++closes; } });
         pendingEffects.splice(0).forEach(commit => commit()); return tree;
     };
     const button = label => nodes(tree).find(node => node.type === "Button" && children(node).includes(label));
@@ -116,6 +123,33 @@ function fixture(kind) {
         }
     };
 }
+
+/** Actual authoring dialog handlers/effects, including separate Load ownership.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.36] */
+test("Mix & match creates only the reviewed saved copy and never auto-loads; dirty current rig blocks Load", async () => {
+    const f = fixture("MixMatch"); f.render();
+    f.button("Review saved rig").props.onClick(); await flush(); f.render();
+    const confirmation = f.all().find(node => node.type === "FormControlLabel" && node.props.label === "I confirm this NAM is an amp head without a baked cabinet.");
+    assert.ok(confirmation); assert.equal(f.button("Create separate copy").props.disabled, true);
+    confirmation.props.control.props.onChange({ target: { checked: true } }); f.render();
+    f.model.presets.set({ ...f.model.presets.get(), presetChanged: true });
+    f.button("Create separate copy").props.onClick(); f.render(); assert.equal(f.writes.length, 1);
+    const request = f.writes[0].args[0]; assert.equal(request.expectedRevision, "saved"); assert.equal(request.instanceId, 1);
+    assert.equal(request.confirmAmpHead, true); assert.equal(request.includePitch, true);
+    f.writes[0].pending.resolve({ bankId: 42, presetId: 1, ampInstanceId: 8, cabInstanceId: 9, pitchInstanceId: 7, name: request.name, sourceRevision: "saved", qualified: false });
+    await flush(); f.render(); assert.equal(f.writes.length, 1, "Creation does not load");
+    assert.equal(f.button("Load experimental copy").props.disabled, true);
+    f.button("Load experimental copy").props.onClick(); await flush(); assert.equal(f.writes.length, 1, "Handler enforces dirty ownership too"); f.unmount();
+});
+test("Mix & match dismiss/disconnect during Create retains uncertainty and ignores obsolete receipt", async () => {
+    const f = fixture("MixMatch"); f.render(); f.button("Review saved rig").props.onClick(); await flush(); f.render();
+    const checkbox = f.all().find(node => node.type === "FormControlLabel" && node.props.label.startsWith("I confirm"));
+    checkbox.props.control.props.onChange({ target: { checked: true } }); f.render();
+    f.button("Create separate copy").props.onClick(); const request = f.writes[0].args[0];
+    f.setOpen(false); assert.ok(f.alerts.some(message => message.includes("may have completed")));
+    f.writes[0].pending.resolve({ bankId: 42, presetId: 1, ampInstanceId: 8, cabInstanceId: 9, pitchInstanceId: 7, name: request.name, sourceRevision: "saved", qualified: false });
+    await flush(); f.setOpen(true); assert.equal(f.writes.length, 1); assert.equal(f.button("Create separate copy").props.disabled, true); f.unmount();
+});
 
 const created = { bankId: 9, revision: "copied", name: "Stage", slots: [0, 1, 2, 3].map(program => ({ program, label: "ABCD"[program], name: "Copy", presetId: 50 + program })) };
 

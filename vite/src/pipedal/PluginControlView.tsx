@@ -33,7 +33,7 @@ import ModGuiHost from './ModGuiHost';
 import { midiChannelBindingControlFeatureEnabled } from './MidiChannelBinding';
 
 import { withStyles } from "tss-react/mui";
-import { PiPedalModel, PiPedalModelFactory } from './PiPedalModel';
+import { PiPedalModel, PiPedalModelFactory, State } from './PiPedalModel';
 import { UiPlugin, UiControl, UiFileProperty, UiFrequencyPlot, ScalePoint } from './Lv2Plugin';
 import {
     Pedalboard, PedalboardItem, ControlValue
@@ -526,6 +526,12 @@ const PluginControlView =
                         onPreviewChange={(value: number) => { this.onPreviewChange(controlValue!.key, value) }}
                         requestIMEEdit={(uiControl: any, value: any) => this.requestImeEdit(uiControl, value)}
                         options={options}
+                        // Standalone T3K Pitch uses the same keyboard-free numeric editor.
+                        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-27] [DES-PITCH-LV2] [7.36]
+                        touchEdit={this.props.item?.uri.startsWith("https://github.com/rixrix/pipedal/plugins/t3k-pitch#")
+                            && ["semitones", "tonality"].includes(uiControl.symbol)
+                            ? { step: uiControl.symbol === "semitones" ? (this.props.item.controlValues.find(value => value.key === "step")?.value === 1 ? 1 : .1) : 1,
+                                live: true, ready: this.model.state.get() === State.Ready } : undefined}
 
                     />
                 ));

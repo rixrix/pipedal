@@ -21,6 +21,8 @@ add_custom_command(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/vite
 
     DEPENDS
+    src/pipedal/Tone3000MixMatch.ts
+    src/pipedal/Tone3000MixMatchDialog.tsx
     src/pipedal/Tone3000Performance.ts
     src/pipedal/Tone3000PerformanceDialog.tsx
     src/pipedal/Tone3000Bundle.ts

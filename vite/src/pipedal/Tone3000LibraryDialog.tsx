@@ -19,6 +19,7 @@ import DialogEx from "./DialogEx";
 import Tone3000PresetPreviewDialog from "./Tone3000PresetPreviewDialog";
 import Tone3000PerformanceDialog from "./Tone3000PerformanceDialog";
 import Tone3000BundleDialog from "./Tone3000BundleDialog";
+import Tone3000MixMatchDialog from "./Tone3000MixMatchDialog";
 import { PiPedalModelFactory, State } from "./PiPedalModel";
 import { tone3000BankLocation, tone3000FilterLibrary } from "./Tone3000Library";
 import type { Tone3000Import, Tone3000LibraryEntry, Tone3000LibraryResult, Tone3000PreviewSelection, Tone3000LibraryFilter } from "./Tone3000Library";
@@ -41,6 +42,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
     const [filter, setFilter] = useState<Tone3000LibraryFilter>("all");
     const [banks, setBanks] = useState(model.banks.get());
     const [preview, setPreview] = useState<Tone3000PreviewSelection | null>(null);
+    const [mixMatch, setMixMatch] = useState<{ entry: Tone3000LibraryEntry; target: Tone3000Import } | null>(null);
     const [performanceOpen, setPerformanceOpen] = useState(false);
     const [bundleOpen, setBundleOpen] = useState(false);
     const [pendingLoad, setPendingLoad] = useState<Tone3000Import | null>(null);
@@ -76,7 +78,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
 
     useEffect(() => {
         alive.current = open;
-        setBusy(false); setRefreshing(false); setPreview(null); setPerformanceOpen(false); setBundleOpen(false);
+        setBusy(false); setRefreshing(false); setPreview(null); setPerformanceOpen(false); setBundleOpen(false); setMixMatch(null);
         if (!open) return;
         /** Invalidate old work; reconciliation is read-only and never replays it.
          * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
@@ -243,6 +245,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                                         <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, target, action: "preview" })}>Compare with source</Button>
                                         {target.sha256 !== entry.sha256 && <Button disabled={busy || refreshing || !connected}
                                             onClick={() => setPreview({ entry, target, action: "update" })}>{target.active ? "Update & load" : "Update"}</Button>}
+                                        <Button disabled={busy || refreshing || !connected} onClick={() => setMixMatch({ entry, target })}>Mix &amp; match</Button>
                                         <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => load(target)}>Load</Button>
                                     </Stack>
                                 </Stack>
@@ -265,6 +268,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                 <Button disabled={busy} onClick={() => { if (!working.current) onClose(); }}>Close</Button>
             </DialogActions>
         </DialogEx>
+        <Tone3000MixMatchDialog selection={open ? mixMatch : null} onClose={() => setMixMatch(null)} />
         <Tone3000PerformanceDialog open={open && performanceOpen} onClose={() => setPerformanceOpen(false)} />
         <Tone3000BundleDialog open={open && bundleOpen} onClose={() => setBundleOpen(false)} />
         <Tone3000PresetPreviewDialog selection={open ? preview : null} onClose={() => setPreview(null)} onConfirm={selection => {

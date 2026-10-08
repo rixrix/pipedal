@@ -548,7 +548,9 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     const changeProfile = (patch: Partial<Tone3000Defaults>) => {
         if (profileDraftRef.current) chooseProfile(profileIdRef.current, { ...profileDraftRef.current, ...patch });
     };
+    const derivedStage = model.pedalboard.get().tryGetItem(instanceId)?.tone3000DerivedSource?.stage;
     const apply = (onlyDefaults = false) => run(async isCurrent => {
+        if (derivedStage && (onlyDefaults || followRef.current)) throw new Error("Split stages keep saved processing settings. Device defaults could change their handoff.");
         const baseline = rigRef.current, desired = draftRef.current;
         if (!baseline || !desired) throw new Error("Refresh the current rig first.");
         if (staleRef.current || waitingRef.current || !captureReadyRef.current) throw new Error("Refresh the current rig before applying changes.");
@@ -680,9 +682,10 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                     <SystemSettings status={status} />
                     <Paper component="section" variant="outlined" sx={{ p: 2 }}>
                         <Stack spacing={2}>
-                            <Typography component="h3" variant="h6">Plugin settings · Current rig</Typography>
+                            <Typography component="h3" variant="h6">Plugin settings · Current rig{derivedStage ? " · " + derivedStage + " stage" : ""}</Typography>
+                            {derivedStage && <Typography variant="body2">This experimental split stage keeps its saved settings. Shared defaults do not change its processing handoff; manual edits still need testing.</Typography>}
                             <Typography variant="body2" color="text.secondary">These captured settings belong to this TONE3000 instance in the current rig. Apply changes, then use PiPedal Save to keep them.</Typography>
-                            <TextField select size="small" label="Processing policy" value={follow ? "follow" : "saved"}
+                            <TextField select size="small" label="Processing policy" disabled={!!derivedStage} value={derivedStage ? "saved" : follow ? "follow" : "saved"}
                                 onChange={event => changeFollow(event.target.value === "follow")}>
                                 <MenuItem value="follow">Follow device defaults</MenuItem>
                                 <MenuItem value="saved">Keep saved settings</MenuItem>
@@ -705,7 +708,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                                 </MenuItem>)}
                             </TextField>
                             <Box className="t3k-field-row" sx={rowStyle}>
-                                <Button variant="outlined" disabled={busy || stale || rigDirty.current}
+                                <Button variant="outlined" disabled={!!derivedStage || busy || stale || rigDirty.current}
                                     onClick={() => { void apply(true); }}>Apply device defaults to this rig</Button>
                             </Box>
                             <Typography variant="caption" color="text.secondary">Follow applies calibration/oversampling on saved-rig recall.

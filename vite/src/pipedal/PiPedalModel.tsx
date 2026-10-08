@@ -1,3 +1,4 @@
+import type { Tone3000MixMatchRequest, Tone3000MixMatchPreview, Tone3000MixMatchResult } from "./Tone3000MixMatch";
 // Copyright (c) Robin E.R. Davies
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
@@ -3958,6 +3959,14 @@ export class PiPedalModel //implements PiPedalModel
     }
     async getTone3000PerformanceSources(): Promise<Tone3000PerformanceSource[]> {
         return (await nullCast(this.webSocket).request<{ sources: Tone3000PerformanceSource[] }>("getTone3000PerformanceSources")).sources;
+    }
+    /** Author a separate saved copy; neither request loads or edits the playing rig.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-26] [FR-27] [DES-PITCH-LV2] [7.36] */
+    getTone3000MixMatchPreview(request: Tone3000MixMatchRequest): Promise<Tone3000MixMatchPreview> {
+        return nullCast(this.webSocket).request("getTone3000MixMatchPreview", request);
+    }
+    createTone3000MixMatch(request: Tone3000MixMatchRequest): Promise<Tone3000MixMatchResult> {
+        return nullCast(this.webSocket).request("createTone3000MixMatch", request);
     }
     createTone3000PerformanceBank(name: string, slots: Tone3000PerformanceSource[]): Promise<Tone3000PerformanceResult> {
         return nullCast(this.webSocket).request<Tone3000PerformanceResult>("createTone3000PerformanceBank", {

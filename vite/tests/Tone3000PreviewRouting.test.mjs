@@ -58,6 +58,20 @@ const block = (blockId, lane, index, type = "nam") => ({ blockId, lane, index, t
 const summary = (blocks, patch = {}) => ({ activePresetName: "Saved", blocks, inputMode: "left", stereoEnabled: false,
     branchSide: "left", branchAfterBlockId: "", ...patch });
 
+/** Ordinary host cloning must retain split-source provenance without aliasing it.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.36] */
+test("actual Pedalboard clone and wire deserialize retain independent derived-stage metadata", () => {
+    const item = new board.PedalboardItem();
+    item.instanceId = 7; item.uri = "https://www.tone3000.com/plugin";
+    item.tone3000DerivedSource = { bankId: 6, presetId: 24, instanceId: 1, revision: "saved", ampBlockId: "amp", cabBlockId: "cab", stage: "amp", creationId: "creation", requestHash: "request" };
+    item.tone3000FollowDefaults = false;
+    const copy = item.clone(), wire = new board.PedalboardItem().deserialize(JSON.parse(JSON.stringify(item)));
+    assert.equal(JSON.stringify(copy.tone3000DerivedSource), JSON.stringify(item.tone3000DerivedSource));
+    assert.equal(JSON.stringify(wire.tone3000DerivedSource), JSON.stringify(item.tone3000DerivedSource));
+    copy.tone3000DerivedSource.stage = "cab"; assert.equal(item.tone3000DerivedSource.stage, "amp");
+    assert.equal(new board.PedalboardItem().tone3000DerivedSource, null, "ordinary rigs remain ordinary");
+});
+
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [FR-17] [DES-FOUR-REFINEMENTS] [7.31] */
 test("production saved preview routes mono/stereo/shared summaries through isolated noninteractive stock boards", () => {
     const render = renderer();

@@ -42,7 +42,7 @@ function fixture(kind, section = "Blocks") {
     Object.assign(context, runModule(rigCode));
     Object.assign(context, runModule(editStateCode));
     context.registry = context.tone3000EditDrafts(context);
-    for (const name of ["Busy", "Refreshing", "Connected", "PendingLoad", "Preview", "PerformanceOpen", "BundleOpen", "RecoveryNotice", "Notice", "Error", "Library",
+    for (const name of ["Busy", "Refreshing", "Connected", "PendingLoad", "Preview", "PerformanceOpen", "BundleOpen", "MixMatch", "RecoveryNotice", "Notice", "Error", "Library",
         "Rig", "Draft", "Follow", "Defaults", "ProfileId", "ProfileDraft", "Status", "Stale", "Waiting", "CaptureReady", "BusyLabel"]) {
         const key = name[0].toLowerCase() + name.slice(1);
         context["set" + name] = value => {
@@ -96,7 +96,7 @@ function fixture(kind, section = "Blocks") {
         vm.runInNewContext(js, context, { filename });
     };
     for (const name of kind === "library" ? ["refresh", "run", "add", "upload"]
-        : ["ownerKey", "ownerCurrent", "invalidateCapture", "publishDraft", "acceptRig", "acceptDefaults", "refresh", "run", "edit", "apply", "saveDefaults"]) install(name, variables.get(name));
+        : ["derivedStage", "ownerKey", "ownerCurrent", "invalidateCapture", "publishDraft", "acceptRig", "acceptDefaults", "refresh", "run", "edit", "apply", "saveDefaults"]) install(name, variables.get(name));
     if (kind === "rig") {
         context.ownership.current.key = context.ownerKey();
         context.renderedOwner = { ...context.ownership.current };

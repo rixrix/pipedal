@@ -54,8 +54,9 @@ export default function Tone3000SoundcheckPanel({ instanceId, active }: { instan
         return () => { ++generation.current; runner.current.stop(); working.current = false; model.state.removeOnChangedHandler(connection); model.presets.removeOnChangedHandler(changed); model.banks.removeOnChangedHandler(changed); };
     }, [model, instanceId]);
     useEffect(() => { if (!active) { ++generation.current; runner.current.stop(); working.current = false; setBusy(false); } }, [active]);
+    const derivedStage = model.pedalboard.get().tryGetItem(instanceId)?.tone3000DerivedSource?.stage;
     const run = (command: Tone3000StageCommand, payload?: object) => {
-        if (!active || !ready || working.current) return;
+        if (!active || !ready || working.current || (command === "level" && derivedStage === "amp")) return;
         working.current = true; setBusy(true); setError(""); setNotice(""); const token = ++generation.current;
         const name = model.pedalboard.get().name;
         void runner.current.run(async () => {
@@ -107,6 +108,7 @@ export default function Tone3000SoundcheckPanel({ instanceId, active }: { instan
         {result && <Typography role="status" variant="body2">{({ queued: "Getting ready…", listening: "Play now…", done: "Check complete.", cancelled: "Check stopped.", failed: "Check could not finish." } as Record<string, string>)[result.state] || result.state}</Typography>}
         {busy && runner.current.running && <Button disabled={!busy || !runner.current.running} onClick={() => { if (!runner.current.running) return; ++generation.current; runner.current.stop(); working.current = false; setBusy(false); setNotice("Stopping the check. Listen to the rig before trying again."); }}>Stop</Button>}
         <Typography component="h3" variant="subtitle1">Match preset volumes</Typography>
+        {derivedStage && <Alert severity="info">{derivedStage === "amp" ? "Measure volume from the T3K cab stage instead. The amp output is kept at unity for the next effects and cabinet." : "This measures the cab stage output, before any PiPedal effects after it. Check the final speaker volume by ear."}</Alert>}
         <Typography variant="body2">Reduce volume jumps when you switch rigs. You choose which rigs to change; this is not a global volume setting.</Typography>
         <Box component="ol" sx={{ pl: 3, my: 0, "& li": { mb: .5 } }}>
             <li><Typography variant="body2">Save your rig first. Use a rig without saved TONE3000 variations in its snapshots.</Typography></li>
@@ -116,7 +118,7 @@ export default function Tone3000SoundcheckPanel({ instanceId, active }: { instan
         </Box>
         <Typography variant="body2" color="text.secondary">We compare the TONE3000 output, before any effects after it. Check the final loudness by ear through your speaker.</Typography>
         {dirty && <Alert severity="warning">You have unsaved changes. Tap PiPedal Save before measuring or exporting.</Alert>}
-        <Button variant="outlined" disabled={!ready || busy || dirty} onClick={() => run("level", { seconds: 3 })}>Measure this rig · 3 seconds</Button>
+        <Button variant="outlined" disabled={derivedStage === "amp" || !ready || busy || dirty} onClick={() => run("level", { seconds: 3 })}>Measure this rig · 3 seconds</Button>
         {result?.state === "done" && result.valid !== undefined && !tone3000ValidMeasurement(result) && <Alert severity="warning">{result.valid && !result.receiptValid
             ? "The saved rig changed. Save it and measure again."
             : result.silent ? "No usable sound was heard. Play your phrase and measure again."

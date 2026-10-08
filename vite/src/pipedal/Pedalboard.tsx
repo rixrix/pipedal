@@ -1,3 +1,4 @@
+import type { Tone3000DerivedSource } from "./Tone3000MixMatch";
 // Copyright (c) Robin E.R. Davies
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
@@ -92,6 +93,7 @@ export class PedalboardItem implements Deserializable<PedalboardItem> {
         this.tone3000SourceKey = input.tone3000SourceKey ?? "";
         this.tone3000SourceHash = input.tone3000SourceHash ?? "";
         this.tone3000FollowDefaults = input.tone3000FollowDefaults ?? false;
+        this.tone3000DerivedSource = input.tone3000DerivedSource ? { ...input.tone3000DerivedSource } : null;
         this.pathProperties = input.pathProperties;
         this.useModUi = input.useModUi ?? false;
         this.iconColor = input.iconColor??"";
@@ -251,6 +253,7 @@ export class PedalboardItem implements Deserializable<PedalboardItem> {
     tone3000SourceHash: string = "";
     /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
     tone3000FollowDefaults: boolean = false;
+    tone3000DerivedSource: Tone3000DerivedSource | null = null;
     pathProperties: {[Name: string]: string} = {};
     useModUi: boolean = false; // true if this item should use the mod-ui.
     iconColor: string = "";
