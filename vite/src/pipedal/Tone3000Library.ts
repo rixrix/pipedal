@@ -64,3 +64,37 @@ export interface Tone3000PreviewSelection {
     entry: Tone3000LibraryEntry; target?: Tone3000Import;
     action: "preview" | "add" | "addNew" | "update";
 }
+
+/** Client filtering uses existing source/import metadata and the real bank index.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-FOUR-REFINEMENTS] [7.30]
+ */
+export type Tone3000LibraryFilter = "all" | "saved" | "new" | "updates";
+
+/** Structural bank index view, keeping names separate from native import identities.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-FOUR-REFINEMENTS] [7.30]
+ */
+export interface Tone3000LibraryBanks { entries?: readonly { instanceId: number; name: string }[]; }
+
+/** Missing names remain explicitly unknown; never substitute the selected bank.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-FOUR-REFINEMENTS] [7.30]
+ */
+export function tone3000BankLocation(bankId: number, banks: Tone3000LibraryBanks): string {
+    const name = banks.entries?.find(bank => bank.instanceId === bankId)?.name;
+    return name?.trim() ? name : `Bank ${bankId} (name unavailable)`;
+}
+
+/** Preserve source/target objects and server order, except current-first in Saved.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-FOUR-REFINEMENTS] [7.30]
+ */
+export function tone3000FilterLibrary(entries: readonly Tone3000LibraryEntry[], filter: Tone3000LibraryFilter,
+    search: string, banks: Tone3000LibraryBanks): Tone3000LibraryEntry[] {
+    const needle = search.trim().toLocaleLowerCase();
+    const result = entries.filter(entry => {
+        if (filter === "saved" && !entry.imports.length || filter === "new" && entry.imports.length
+            || filter === "updates" && !entry.imports.some(target => target.sha256 !== entry.sha256)) return false;
+        return [entry.name, entry.source, ...entry.imports.flatMap(target => [target.name, tone3000BankLocation(target.bankId, banks)])]
+            .join(" ").toLocaleLowerCase().includes(needle);
+    });
+    if (filter === "saved") result.sort((left, right) => Number(right.imports.some(target => target.active)) - Number(left.imports.some(target => target.active)));
+    return result;
+}

@@ -20,13 +20,15 @@ import Tone3000PresetPreviewDialog from "./Tone3000PresetPreviewDialog";
 import Tone3000PerformanceDialog from "./Tone3000PerformanceDialog";
 import Tone3000BundleDialog from "./Tone3000BundleDialog";
 import { PiPedalModelFactory, State } from "./PiPedalModel";
-import type { Tone3000Import, Tone3000LibraryEntry, Tone3000LibraryResult, Tone3000PreviewSelection } from "./Tone3000Library";
+import { tone3000BankLocation, tone3000FilterLibrary } from "./Tone3000Library";
+import type { Tone3000Import, Tone3000LibraryEntry, Tone3000LibraryResult, Tone3000PreviewSelection, Tone3000LibraryFilter } from "./Tone3000Library";
 
 /** Discover and explicitly apply complete rigs without operator file copying.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.10]
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-CONTROL-SCOPE] [7.18]
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-STABILITY-REVIEW] [7.22]
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-PLAIN-TOOLS] [7.25]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-FOUR-REFINEMENTS] [7.30]
  */
 export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     const model = PiPedalModelFactory.getInstance();
@@ -36,6 +38,8 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
     const [search, setSearch] = useState("");
+    const [filter, setFilter] = useState<Tone3000LibraryFilter>("all");
+    const [banks, setBanks] = useState(model.banks.get());
     const [preview, setPreview] = useState<Tone3000PreviewSelection | null>(null);
     const [performanceOpen, setPerformanceOpen] = useState(false);
     const [bundleOpen, setBundleOpen] = useState(false);
@@ -46,6 +50,12 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
     const alive = useRef(false);
     const working = useRef(false);
     const generation = useRef(0);
+
+    useEffect(() => {
+        if (!open) return;
+        model.banks.addOnChangedHandler(setBanks);
+        return () => model.banks.removeOnChangedHandler(setBanks);
+    }, [open, model]);
 
     const refresh = useCallback(async (clearError = false) => {
         if (working.current || !alive.current || model.state.get() !== State.Ready) return;
@@ -160,8 +170,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
         }
         return count + (count === 1 ? " rig uploaded. Select Add to save it in PiPedal." : " rigs uploaded. Select Add to save them in PiPedal.");
     });
-    const entries = library.entries.filter(entry =>
-        [entry.name, entry.source, ...entry.imports.map(target => target.name)].join(" ").toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+    const entries = tone3000FilterLibrary(library.entries, filter, search, banks);
 
     return <>
         <DialogEx tag="tone3000Library" open={open} fullWidth maxWidth="md"
@@ -198,7 +207,12 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                     {recoveryNotice && <Alert severity="warning" onClose={() => setRecoveryNotice("")}>{recoveryNotice}</Alert>}
                     {notice && <Alert severity="success" onClose={() => setNotice("")}>{notice}</Alert>}
                     {library.warnings.map((warning, index) => <Alert severity="warning" key={index}>{warning}</Alert>)}
-                    <TextField label="Find a rig" value={search} onChange={event => setSearch(event.target.value)} size="small" fullWidth />
+                    <TextField label="Find a rig or bank" value={search} onChange={event => setSearch(event.target.value)} size="small" fullWidth />
+                    <Stack direction="row" role="group" aria-label="Filter TONE3000 Library" sx={{ flexWrap: "wrap", gap: .5 }}>
+                        {([['all', 'All'], ['saved', 'Saved'], ['new', 'New'], ['updates', 'Updates']] as const).map(([value, label]) =>
+                            <Button key={value} variant={filter === value ? "contained" : "outlined"} aria-pressed={filter === value}
+                                onClick={() => setFilter(value)}>{label}</Button>)}
+                    </Stack>
                     {!entries.length && !refreshing && <Typography color="text.secondary">
                         {library.entries.length ? "No matching rigs." : "No rigs found. Save a preset in TONE3000 or upload a .t3kpreset file."}
                     </Typography>}
@@ -223,6 +237,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                                 sx={{ borderTop: 1, borderColor: "divider", pt: 1 }}>
                                 <Stack spacing={.5}>
                                     <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>{target.name}{target.active ? " · Current rig" : ""}</Typography>
+                                    <Typography variant="caption" component="p" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>Bank: {tone3000BankLocation(target.bankId, banks)}</Typography>
                                     {target.sha256 !== entry.sha256 && <Typography variant="caption" color="warning.main">Source changed. Update replaces this saved copy.</Typography>}
                                     <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
                                         <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, target, action: "preview" })}>Compare with source</Button>
