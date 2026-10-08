@@ -46,6 +46,7 @@
 #include "Uri.hpp"
 #include "Tone3000Tone.hpp"
 #include "Tone3000Operations.hpp"
+#include "AudioRecoveryPolicy.hpp"
 
 namespace pipedal
 {
@@ -135,6 +136,16 @@ namespace pipedal
         clock::time_point lastRestartTime = clock::time_point::min();
         int audioRestartRetries = 0;
         PostHandle audioRetryPostHandle = 0;
+        // Lifecycle lock precedes model mutex; joins never hold model mutex.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-USB] [7.9]
+        std::recursive_mutex audioLifecycleMutex;
+        AudioRecoveryPolicy configuredAudioRecovery;
+        PostHandle configuredAudioRecoveryPostHandle = 0;
+        bool configuredAudioRecoveryRunning = false;
+        void CancelConfiguredAudioRecovery();
+        void ArmConfiguredAudioRecovery();
+        void ScheduleConfiguredAudioRecovery();
+        void RetryConfiguredAudio(uint64_t generation);
 
         bool hasWifi = false;
 

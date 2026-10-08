@@ -2270,7 +2270,7 @@ private:
         }
     };
 
-    bool restarting = false;
+    std::atomic<bool> restarting = false;
     std::vector<RestartThread *> restartThreads;
 
 public:
@@ -2342,6 +2342,19 @@ public:
         if (this->audioDriver != nullptr)
         {
             result.cpuUsage_ = audioDriver->CpuUse();
+        }
+        // Legacy active excludes silent fallback. Report the running engine
+        // separately and obtain device identity only from its actual driver.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.2]
+        result.engineRunning_ = active.load() && !audioStopped.load();
+        if (*result.engineRunning_ && audioDriver)
+        {
+            auto actual = audioDriver->GetRuntimeInfo();
+            result.audioDriver_ = std::move(actual.driver);
+            result.actualInputDevice_ = std::move(actual.inputDevice);
+            result.actualOutputDevice_ = std::move(actual.outputDevice);
+            result.usingFallback_ = actual.usingFallback;
+            result.actualSampleRate_ = actual.sampleRate;
         }
         GetCpuFrequency(&result.cpuFreqMin_, &result.cpuFreqMax_);
         result.hasCpuGovernor_ = HasCpuGovernor();
@@ -2544,4 +2557,10 @@ JSON_MAP_REFERENCE(JackHostStatus, cpuFreqMin)
 JSON_MAP_REFERENCE(JackHostStatus, cpuFreqMax)
 JSON_MAP_REFERENCE(JackHostStatus, hasCpuGovernor)
 JSON_MAP_REFERENCE(JackHostStatus, governor)
+JSON_MAP_REFERENCE(JackHostStatus, audioDriver)
+JSON_MAP_REFERENCE(JackHostStatus, actualInputDevice)
+JSON_MAP_REFERENCE(JackHostStatus, actualOutputDevice)
+JSON_MAP_REFERENCE(JackHostStatus, usingFallback)
+JSON_MAP_REFERENCE(JackHostStatus, engineRunning)
+JSON_MAP_REFERENCE(JackHostStatus, actualSampleRate)
 JSON_MAP_END()

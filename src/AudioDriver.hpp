@@ -28,6 +28,7 @@
 #include "AlsaSequencer.hpp"
 #include "MidiEvent.hpp"
 #include "DeviceVus.hpp"
+#include <optional>
 
 
 
@@ -37,6 +38,15 @@ namespace pipedal {
     using ProcessCallback = std::function<void (size_t)>;
 
     class ChannelSelection;
+
+    /** Read-only identity of opened driver streams; absent values stay unknown.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.2]
+     */
+    struct AudioDriverRuntimeInfo {
+        std::string driver, inputDevice, outputDevice;
+        std::optional<bool> usingFallback;
+        std::optional<uint32_t> sampleRate;
+    };
 
     class AudioDriverHost {
     public:
@@ -99,6 +109,8 @@ namespace pipedal {
         virtual void Close() = 0;
 
         virtual std::string GetConfigurationDescription() = 0;
+        // Non-RT status only. Drivers without introspection remain compatible.
+        virtual AudioDriverRuntimeInfo GetRuntimeInfo() { return {}; }
         virtual void DumpBufferTrace(size_t nEntries) {}
 
     };

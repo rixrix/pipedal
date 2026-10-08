@@ -28,6 +28,7 @@
 #include "AudioHost.hpp"
 #include "JackServerSettings.hpp"
 #include <functional>
+#include <optional>
 #include "PiPedalAlsa.hpp"
 #include "Promise.hpp"
 #include "json_variant.hpp"
@@ -192,8 +193,8 @@ namespace pipedal
     public:
         bool active_ = false;
         std::string errorMessage_;
-        bool restarting_;
-        uint64_t underruns_;
+        bool restarting_ = false;
+        uint64_t underruns_ = 0;
         float cpuUsage_ = 0;
         uint64_t msSinceLastUnderrun_ = 0;
         int32_t temperaturemC_ = -100000;
@@ -201,6 +202,12 @@ namespace pipedal
         uint64_t cpuFreqMin_ = 0;
         bool hasCpuGovernor_ = true;
         std::string governor_;
+        /** Additive actual-driver status; omitted/unknown is not a real device.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.2]
+         */
+        std::string audioDriver_, actualInputDevice_, actualOutputDevice_;
+        std::optional<bool> usingFallback_, engineRunning_;
+        std::optional<uint32_t> actualSampleRate_;
 
         DECLARE_JSON_MAP(JackHostStatus);
     };

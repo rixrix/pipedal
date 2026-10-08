@@ -132,6 +132,7 @@ void PrepareSnapshostsForSave(Pedalboard &pedalboard)
 
 void PiPedalModel::Close()
 {
+    std::lock_guard lifecycle(audioLifecycleMutex);
     std::unique_ptr<AudioHost> oldAudioHost;
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -147,6 +148,7 @@ void PiPedalModel::Close()
         closed = true;
 
         CancelAudioRetry();
+        CancelConfiguredAudioRecovery();
 
         if (avahiService)
         {
@@ -1646,6 +1648,14 @@ JackConfiguration PiPedalModel::GetJackConfiguration()
 
 void PiPedalModel::RestartAudio(bool useDummyAudioDriver)
 {
+    // Prevent a validated automatic retry racing intentional Close/settings.
+    // Keep the model lock out of driver Close and its reader-thread join.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-USB] [7.9]
+    std::lock_guard lifecycle(audioLifecycleMutex);
+    {
+        std::lock_guard guard(mutex);
+        if (closed || !audioHost) return;
+    }
     try
     {
         if (useDummyAudioDriver)
@@ -1701,6 +1711,8 @@ void PiPedalModel::RestartAudio(bool useDummyAudioDriver)
 
         this->UpdateRealtimeVuSubscriptions();
         UpdateRealtimeMonitorPortSubscriptions();
+        if (useDummyAudioDriver) ArmConfiguredAudioRecovery();
+        else CancelConfiguredAudioRecovery();
     }
     catch (const std::exception &e)
     {
@@ -1717,6 +1729,7 @@ void PiPedalModel::RestartAudio(bool useDummyAudioDriver)
         {
             RestartAudio(true); // use the dummy audio driver.
         }
+        else CancelConfiguredAudioRecovery();
     }
 }
 
@@ -2240,14 +2253,21 @@ JackServerSettings PiPedalModel::GetJackServerSettings()
 
 void PiPedalModel::SetOnboarding(bool value)
 {
-    std::unique_lock<std::recursive_mutex> guard(mutex);
-    this->jackServerSettings.SetIsOnboarding(value);
-    SetJackServerSettings(this->jackServerSettings);
+    std::lock_guard lifecycle(audioLifecycleMutex);
+    JackServerSettings settings;
+    {
+        std::lock_guard guard(mutex);
+        settings = this->jackServerSettings;
+        settings.SetIsOnboarding(value);
+    }
+    SetJackServerSettings(settings);
 }
 
 void PiPedalModel::SetJackServerSettings(const JackServerSettings &jackServerSettings)
 {
+    std::lock_guard lifecycle(audioLifecycleMutex);
     std::unique_lock<std::recursive_mutex> guard(mutex);
+    CancelConfiguredAudioRecovery();
 
 #if JACK_HOST
     if (!adminClient.CanUseShutdownClient())
@@ -3743,6 +3763,108 @@ void PiPedalModel::CancelAudioRetry()
     }
 }
 
+/** Retire timers and already-dispatched callbacks on intentional lifecycle changes.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-USB] [7.9]
+ */
+void PiPedalModel::CancelConfiguredAudioRecovery()
+{
+    std::lock_guard guard(mutex);
+    configuredAudioRecovery.Cancel();
+    if (configuredAudioRecoveryPostHandle) {
+        CancelPost(configuredAudioRecoveryPostHandle);
+        configuredAudioRecoveryPostHandle = 0;
+    }
+}
+
+void PiPedalModel::ArmConfiguredAudioRecovery()
+{
+    std::lock_guard guard(mutex);
+    if (closed || !audioHost || !audioHost->IsOpen() || !jackServerSettings.IsValid()
+        || jackServerSettings.IsDummyAudioDevice()) return;
+    auto status = audioHost->getJackStatus();
+    // Called only after a successful explicit dummy-driver Open. A transient
+    // busy driver accessor must not lose recovery; the timer rechecks it.
+    if (status.engineRunning_ != true || status.usingFallback_ == false) return;
+    configuredAudioRecovery.Start(); // Re-entering fallback never resets its budget.
+    if (!configuredAudioRecoveryRunning) ScheduleConfiguredAudioRecovery();
+}
+
+void PiPedalModel::ScheduleConfiguredAudioRecovery()
+{
+    if (!configuredAudioRecovery.Active() || configuredAudioRecoveryPostHandle || closed) return;
+    auto generation = configuredAudioRecovery.Generation();
+    try {
+        configuredAudioRecoveryPostHandle = PostDelayed(configuredAudioRecovery.NextDelay(),
+            [this,generation] { RetryConfiguredAudio(generation); });
+    } catch (const std::exception& e) {
+        configuredAudioRecovery.Cancel();
+        Lv2Log::warning(SS("Unable to schedule configured audio recovery. " << e.what()));
+    }
+}
+
+/** The established restart reloads channels/plugins/subscriptions, never settings.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-USB] [7.9]
+ */
+void PiPedalModel::RetryConfiguredAudio(uint64_t generation) try {
+    std::lock_guard lifecycle(audioLifecycleMutex);
+    bool attempt = false;
+    {
+        std::lock_guard guard(mutex);
+        if (!configuredAudioRecovery.IsCurrent(generation)) return;
+        configuredAudioRecoveryPostHandle = 0;
+        if (closed || !audioHost || !audioHost->IsOpen() || !jackServerSettings.IsValid()
+            || jackServerSettings.IsDummyAudioDevice()) { CancelConfiguredAudioRecovery(); return; }
+        auto status = audioHost->getJackStatus();
+        if (status.engineRunning_ == false || status.usingFallback_ == false) {
+            CancelConfiguredAudioRecovery(); return;
+        }
+        if (status.engineRunning_ != true || status.usingFallback_ != true || status.restarting_) {
+            ScheduleConfiguredAudioRecovery(); return;
+        }
+        try {
+            std::vector<AudioRecoveryEndpoint> endpoints;
+            for (const auto& device : GetAlsaDevices())
+                endpoints.push_back({device.id_,device.supportsCapture_,device.supportsPlayback_,
+                                     device.captureBusy_,device.playbackBusy_});
+            auto [input,output] = AudioRecoveryPolicy::Presence(endpoints,
+                jackServerSettings.GetAlsaInputDevice(),jackServerSettings.GetAlsaOutputDevice());
+            attempt = configuredAudioRecovery.Observe(generation,input,output,clock::now())
+                == AudioRecoveryPolicy::Action::Attempt;
+        } catch (const std::exception& e) {
+            Lv2Log::warning(SS("Configured audio presence check failed. " << e.what()));
+        }
+        if (!attempt) { ScheduleConfiguredAudioRecovery(); return; }
+        // A pending intended T3K state must survive a partial runtime capture.
+        GuardTone3000PendingStates(false);
+        for (auto* item : pedalboard.GetAllPlugins()) {
+            try {
+                if (item->uri() == Tone3000Preset::PLUGIN_URI) {
+                    if (!pendingTone3000States.contains(item->instanceId())) CaptureTone3000Item(item->instanceId());
+                } else if (audioHost->UpdatePluginState(*item)) {
+                    item->stateUpdateCount(item->stateUpdateCount()+1);
+                    FireLv2StateChanged(item->instanceId(),item->lv2State());
+                }
+            } catch (const std::exception&) { /* Best effort; retain the existing recovery state. */ }
+        }
+        configuredAudioRecoveryRunning = true;
+        Lv2Log::info(SS("Retrying configured audio interface (attachment attempt "
+            << configuredAudioRecovery.Attempts() << "/3)."));
+    }
+    // No model mutex across driver shutdown/join; lifecycle excludes config/Close.
+    RestartAudio();
+    {
+        std::lock_guard guard(mutex);
+        configuredAudioRecoveryRunning = false;
+        if (configuredAudioRecovery.IsCurrent(generation)) ScheduleConfiguredAudioRecovery();
+    }
+} catch (const std::exception& e) {
+    // A callback error must not terminate the shared DBus dispatcher thread.
+    std::lock_guard guard(mutex);
+    configuredAudioRecoveryRunning = false;
+    if (configuredAudioRecovery.IsCurrent(generation)) CancelConfiguredAudioRecovery();
+    Lv2Log::warning(SS("Configured audio recovery stopped. " << e.what()));
+}
+
 void PiPedalModel::OnAlsaDriverTerminatedAbnormally()
 {
     // notification from the realtime thread, via the audiohost that the
@@ -3860,12 +3982,14 @@ ChannelRouterSettings::ptr PiPedalModel::GetChannelRouterSettings()
 
 void PiPedalModel::SetChannelRouterSettings(int64_t clientId, ChannelRouterSettings::ptr &settings)
 {
+    std::lock_guard lifecycle(audioLifecycleMutex);
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
         this->channelRouterSettings = settings;
         this->storage.SetChannelRouterSettings(settings);
         this->pluginHost.OnConfigurationChanged(jackConfiguration, *settings);
         CancelAudioRetry();
+        CancelConfiguredAudioRecovery();
     }
     RestartAudio(); // no lock to avoid mutex deadlock when reader thread is sending notifications..
 

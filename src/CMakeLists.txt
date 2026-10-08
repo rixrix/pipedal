@@ -258,6 +258,7 @@ set (PIPEDAL_SOURCES
     Tone3000Library.hpp Tone3000Library.cpp
     Tone3000Defaults.hpp Tone3000Defaults.cpp
     Tone3000Operations.hpp Tone3000Operations.cpp
+    AudioRecoveryPolicy.hpp
     Tone3000Tone.hpp Tone3000Tone.cpp
     AesDigest.cpp AesDigest.hpp
     ChannelRouterSettings.cpp ChannelRouterSettings.hpp
@@ -507,6 +508,7 @@ add_executable(pipedaltest
     Tone3000PresetTest.cpp
     Tone3000LibraryTest.cpp
     Tone3000DefaultsTest.cpp
+    AudioRecoveryPolicyTest.cpp
 
 
     SystemConfigFile.hpp SystemConfigFile.cpp
@@ -521,6 +523,7 @@ set_property(SOURCE Tone3000HostTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fa
 # Uploaded preset validation must reject nonfinite numbers in release builds.
 # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.8]
 set_property(SOURCE Tone3000Preset.cpp Tone3000PresetTest.cpp Tone3000Defaults.cpp Tone3000DefaultsTest.cpp Tone3000Operations.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
+set_property(SOURCE AudioRecoveryPolicyTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
 target_link_libraries(pipedaltest PRIVATE ${PIPEDAL_LIBS} ${ICU_LIBRARIES})
 target_include_directories(pipedaltest PRIVATE ${PIPEDAL_INCLUDES})
 
