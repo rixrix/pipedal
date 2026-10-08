@@ -1,6 +1,21 @@
 // Copyright (c) 2026 PiPedal contributors
 // SPDX-License-Identifier: MIT
 
+/** Only shipped pitch descriptors opt into ordinary-port touch editing.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-27] [DES-PITCH-LV2] [7.36]
+ */
+export function tone3000PitchPlugin(uri: string | undefined): boolean {
+    return uri === "https://github.com/rixrix/pipedal/plugins/t3k-pitch#mono"
+        || uri === "https://github.com/rixrix/pipedal/plugins/t3k-pitch#stereo";
+}
+
+/** Patch T3K and the two ordinary-port pitch descriptors share owner guards.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-TOUCH-EDITOR] [DES-PITCH-LV2] [7.36]
+ */
+export function tone3000TouchPlugin(uri: string | undefined): boolean {
+    return uri === "https://www.tone3000.com/plugin" || tone3000PitchPlugin(uri);
+}
+
 /** Fine steps are in displayed units, never normalized saved LV2 values.
  * Unknown controls use their discovered span and integer contract.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-16] [DES-TOUCH-EDITOR] [7.27]

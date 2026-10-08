@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import vm from "node:vm";
-import { tone3000TouchLive, tone3000TouchStep } from "../src/pipedal/Tone3000TouchSettings.ts";
+import { tone3000TouchLive, tone3000TouchStep, tone3000PitchPlugin, tone3000TouchPlugin } from "../src/pipedal/Tone3000TouchSettings.ts";
 import { presentPatchNumber, rawPatchNumber, tone3000NumberPresentation } from "../src/pipedal/Tone3000ControlUnits.ts";
 import { tone3000DraftNumber, tone3000FormatNumber, tone3000SameDraftNumber } from "../src/pipedal/Tone3000MobileLayout.ts";
 
@@ -17,7 +17,7 @@ const prefix = "https://www.tone3000.com/plugin:";
  * This fixture records setter dispatch; it cannot qualify an atomic daemon/MIDI race.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-TOUCH-EDITOR] [7.27]
  */
-function ownerFixture() {
+function ownerFixture(uri = "https://www.tone3000.com/plugin") {
     const ast = parse("PluginControl.tsx");
     const names = ["inputContextKey", "touchCurrent", "removeTouchListeners", "closeTouchEditor", "openTouchEditor", "touchChange", "componentWillUnmount"];
     const methods = new Map();
@@ -28,11 +28,11 @@ function ownerFixture() {
     visit(ast); assert.equal(methods.size, names.length);
     const observableAst = parse("ObservableProperty.tsx");
     const observable = observableAst.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === "ObservableProperty");
-    const context = { State: { Ready: 1 } };
+    const context = { State: { Ready: 1 }, tone3000PitchPlugin, tone3000TouchPlugin };
     vm.runInNewContext(compile(observable.getText(observableAst).replace(/^export /, "")
         + "\nglobalThis.Property = ObservableProperty;\nglobalThis.Editor = class {" + [...methods.values()].join("\n") + "}"), context);
     const property = value => new context.Property(value), writes = [];
-    const board = { selectedSnapshot: -1, tryGetItem: () => ({ uri: "https://www.tone3000.com/plugin" }) };
+    const board = { selectedSnapshot: -1, tryGetItem: () => ({ uri }) };
     const model = { state: property(1), banks: property({ selectedBank: 6 }), presets: property({ selectedInstanceId: 26, presetChanged: false }),
         selectedSnapshot: property(-1), pedalboard: property(board) };
     const editor = new context.Editor();
@@ -53,6 +53,87 @@ test("production Patch touch dispatch is live only when opted in; release-only, 
     for (const value of [NaN, Infinity, -Infinity, -25, 25]) f.editor.touchChange(value, true);
     f.editor.props.touchEdit.ready = false; f.editor.touchChange(3, true); assert.deepEqual(f.writes, [-12.5, 2]);
     f.editor.closeTouchEditor(); assert.equal(f.subscriptions(), 0); f.editor.touchChange(4, true); assert.equal(f.writes.length, 2);
+});
+
+/** Use real board cloning, ordinary-port setter and its synchronous publication.
+ * Only network delivery and unrelated enabled-item UI listeners are sinks.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-27] [DES-PITCH-LV2] [7.36]
+ */
+function pitchOwnerFixture(uri) {
+    const f = ownerFixture(uri), context = {};
+    const stripped = name => parse(name).statements.filter(node => !ts.isImportDeclaration(node))
+        .map(node => node.getText().replace(/^export default /, "").replace(/^export /, "")).join("\n");
+    const ast = parse("PiPedalModel.tsx"), names = ["_setPedalboardControlValue", "setPedalboardControl", "setModelPedalboard", "removeInvalidSidechains", "previewPedalboardValue", "_setServerControl"];
+    const methods = new Map();
+    const visit = node => {
+        if (ts.isMethodDeclaration(node) && names.includes(node.name.getText(ast))) methods.set(node.name.getText(ast), node.getText(ast));
+        ts.forEachChild(node, visit);
+    };
+    visit(ast); assert.equal(methods.size, names.length);
+    vm.runInNewContext(compile(["PiPedalError.tsx", "MidiBinding.tsx", "MidiChannelBinding.tsx", "Pedalboard.tsx"].map(stripped).join("\n")
+        + "\nglobalThis.Board = Pedalboard; globalThis.Item = PedalboardItem; globalThis.Control = ControlValue;"
+        + "\nglobalThis.Model = class {" + [...methods.values()].join("\n") + "}"), context);
+    const board = new context.Board(), item = new context.Item();
+    item.instanceId = 1; item.uri = uri; item.controlValues = [new context.Control("semitones", 0), new context.Control("step", 1)];
+    board.items = [item]; board.selectedSnapshot = -1; board.name = "Owner";
+    f.model.pedalboard.set(board);
+    for (const name of names) f.model[name] = context.Model.prototype[name];
+    const messages = [];
+    f.model.clientId = 12; f.model.webSocket = { send: (message, body) => messages.push({ message, ...body }) };
+    f.model._controlValueChangeItems = []; f.model.updateEnabledItems = () => {};
+    f.model.getUiPlugin = () => ({ getControl: () => ({ is_expensive: false }) });
+    f.editor.props.uiControl = { symbol: "semitones", min_value: -24, max_value: 24 };
+    f.editor.props.onPreviewChange = value => f.model.previewPedalboardValue(1, "semitones", value);
+    f.editor.props.onChange = value => f.model.setPedalboardControl(1, "semitones", value);
+    return { ...f, messages };
+}
+
+test("production original URI and exact mono/stereo pitch URIs are the only touch owners", () => {
+    for (const uri of ["https://www.tone3000.com/plugin", "https://github.com/rixrix/pipedal/plugins/t3k-pitch#mono", "https://github.com/rixrix/pipedal/plugins/t3k-pitch#stereo"]) {
+        const f = ownerFixture(uri); f.editor.openTouchEditor();
+        assert.equal(f.editor.state.touchEditorOpen, true); assert.equal(f.subscriptions(), 5); f.editor.componentWillUnmount();
+    }
+    for (const uri of [undefined, "other-plugin", "https://github.com/rixrix/pipedal/plugins/t3k-pitch#unknown", "https://github.com/rixrix/pipedal/plugins/t3k-pitch#mono-extra"]) {
+        const f = ownerFixture(uri); f.board.tryGetItem = () => ({ uri }); f.editor.openTouchEditor();
+        assert.equal(f.editor.state.touchEditorOpen, false); assert.equal(f.subscriptions(), 0);
+    }
+});
+
+test("actual ordinary pitch preview leaves the saved board intact; exact commit publication keeps editor open", () => {
+    for (const uri of ["https://github.com/rixrix/pipedal/plugins/t3k-pitch#mono", "https://github.com/rixrix/pipedal/plugins/t3k-pitch#stereo"]) {
+        const f = pitchOwnerFixture(uri); f.editor.openTouchEditor();
+        const original = f.model.pedalboard.get();
+        f.editor.touchChange(-7, false); f.editor.touchChange(-8, false);
+        assert.equal(f.editor.state.touchEditorOpen, true); assert.equal(f.model.pedalboard.get(), original);
+        assert.deepEqual(f.messages.map(message => [message.message, message.value]), [["previewControl", -7], ["previewControl", -8]]);
+        f.editor.touchChange(-8, true);
+        assert.equal(f.editor.state.touchEditorOpen, true); assert.equal(f.subscriptions(), 5);
+        assert.equal(f.model.pedalboard.get().getItem(1).getControlValue("semitones"), -8);
+        assert.equal(original.getItem(1).getControlValue("semitones"), 0, "commit clones rather than mutates the prior owner");
+        assert.equal(f.messages.at(-1).message, "setControl"); assert.equal(f.messages.length, 3);
+        assert.equal(f.editor.touchExpectedBoard, undefined, "owned publication allowance is consumed synchronously");
+        f.model.pedalboard.set(f.model.pedalboard.get().clone());
+        assert.equal(f.editor.state.touchEditorOpen, false, "even equal external board replacement retires the gesture outside commit");
+        f.editor.touchChange(1, true); assert.equal(f.messages.length, 3); assert.equal(f.subscriptions(), 0);
+    }
+});
+
+test("ordinary pitch commit cannot ignore foreign board, preset or duplicate publication inside its callback", () => {
+    for (const mutation of ["board", "preset", "duplicate"]) {
+        const f = pitchOwnerFixture("https://github.com/rixrix/pipedal/plugins/t3k-pitch#stereo"); f.editor.openTouchEditor();
+        f.editor.props.onChange = value => {
+            f.model.setPedalboardControl(1, "semitones", value);
+            if (mutation === "preset") f.model.presets.set({ selectedInstanceId: 27, presetChanged: false });
+            else {
+                const board = f.model.pedalboard.get().clone();
+                if (mutation === "board") board.output_volume_db = 3;
+                f.model.pedalboard.set(board);
+            }
+        };
+        f.editor.touchChange(-7, true);
+        assert.equal(f.editor.state.touchEditorOpen, false, mutation); assert.equal(f.subscriptions(), 0);
+        f.editor.touchChange(2, true); assert.equal(f.messages.length, 1);
+    }
 });
 
 test("production immediate subscriptions retain dirty-only events and synchronously reject bank/preset/snapshot/connection A→B→A gestures", () => {

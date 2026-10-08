@@ -35,6 +35,7 @@ import Switch from '@mui/material/Switch';
 import Utility from './Utility';
 import MenuItem from '@mui/material/MenuItem';
 import Tone3000TouchEditor from "./Tone3000TouchEditor";
+import { tone3000PitchPlugin, tone3000TouchPlugin } from "./Tone3000TouchSettings";
 import { PiPedalModel, PiPedalModelFactory, State } from './PiPedalModel';
 import DialIcon from './svg/fx_dial.svg?react';
 import { isDarkMode } from './DarkMode';
@@ -293,9 +294,11 @@ const PluginControl =
             componentWillUnmount() {
                 this.removeTouchListeners();
                 this.touchContext = undefined;
+                this.touchExpectedBoard = undefined;
                 this.hideZoomedControl();
             }
             private touchContext?: string;
+            private touchExpectedBoard?: string;
             private touchSubscriptions: (() => void)[] = [];
 
             /** Reject stale queued gestures before any setter can run.
@@ -303,13 +306,14 @@ const PluginControl =
             touchCurrent(): boolean {
                 return this.touchContext !== undefined && this.touchContext === this.inputContextKey()
                     && this.model.state.get() === State.Ready
-                    && this.model.pedalboard.get().tryGetItem(this.props.instanceId)?.uri === "https://www.tone3000.com/plugin";
+                    && tone3000TouchPlugin(this.model.pedalboard.get().tryGetItem(this.props.instanceId)?.uri);
             }
             removeTouchListeners(): void {
                 this.touchSubscriptions.splice(0).forEach(remove => remove());
             }
             closeTouchEditor(): void {
                 this.touchContext = undefined;
+                this.touchExpectedBoard = undefined;
                 this.removeTouchListeners();
                 this.setState({ touchEditorOpen: false });
             }
@@ -317,7 +321,7 @@ const PluginControl =
              * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-TOUCH-EDITOR] [7.27] */
             openTouchEditor(): void {
                 if (!this.props.touchEdit?.ready || this.model.state.get() !== State.Ready
-                    || this.model.pedalboard.get().tryGetItem(this.props.instanceId)?.uri !== "https://www.tone3000.com/plugin") return;
+                    || !tone3000TouchPlugin(this.model.pedalboard.get().tryGetItem(this.props.instanceId)?.uri)) return;
                 this.removeTouchListeners();
                 this.touchContext = this.inputContextKey();
                 this.setState({ touchEditorOpen: true });
@@ -330,6 +334,14 @@ const PluginControl =
                 let initial = true;
                 const boardChanged = () => {
                     if (initial) { initial = false; return; }
+                    // Only one exact board predicted by this synchronous port
+                    // commit may pass; all other replacements retire the editor.
+                    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.36]
+                    if (this.touchExpectedBoard !== undefined && this.touchCurrent()
+                        && JSON.stringify(this.model.pedalboard.get()) === this.touchExpectedBoard) {
+                        this.touchExpectedBoard = undefined;
+                        return;
+                    }
                     this.closeTouchEditor();
                 };
                 this.model.pedalboard.addOnChangedHandler(boardChanged);
@@ -341,7 +353,17 @@ const PluginControl =
                 if (!this.touchCurrent() || !this.props.touchEdit?.ready || !Number.isFinite(value)) return;
                 const control = this.props.uiControl;
                 if (!control || value < control.min_value || value > control.max_value) return;
-                if (commit || this.props.touchEdit.live) this.props.onChange(value);
+                if (tone3000PitchPlugin(this.model.pedalboard.get().tryGetItem(this.props.instanceId)?.uri)) {
+                    if (!commit) {
+                        if (this.props.touchEdit.live) this.props.onPreviewChange?.(value);
+                        return;
+                    }
+                    const expected = this.model.pedalboard.get().clone();
+                    expected.getItem(this.props.instanceId).setControlValue(control.symbol, value);
+                    this.touchExpectedBoard = JSON.stringify(expected);
+                    try { this.props.onChange(value); }
+                    finally { this.touchExpectedBoard = undefined; }
+                } else if (commit || this.props.touchEdit.live) this.props.onChange(value);
             }
             inputChanged: boolean = false;
             private inputContext?: string;
