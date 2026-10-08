@@ -3,9 +3,9 @@ afx: true
 type: SPRINT
 status: Approved
 owner: "@rixrix"
-version: "2.11"
+version: "2.12"
 created_at: "2026-10-03T23:59:54.000Z"
-updated_at: "2026-10-08T00:39:35.000Z"
+updated_at: "2026-10-08T00:57:27.000Z"
 tags: ["tone3000-gig-rig", "sprint", "raspberry-pi", "lv2"]
 approval:
   spec: Approved
@@ -1294,6 +1294,17 @@ Actual served Edge desktop, **344 × 794** and **414 × 794** Responsive viewpor
 
 Final guarded static publication: Pi private `/home/nam/.local/state/pipedal-gig-rig/touch-editor-ui-final-20261008`, `index_published=true`, `entry_state=incoming`, `published_files_verified=true`, `observed_changed_fields=[]`, `failure_type=null`. Initial and final static rollback archives retained on Pi. Served `/assets/main-CrOwyilP.js` SHA-256 **62d6311de770a8c4397c551ad3db5ff8b87f2045cd9080675fc7404690dae7f4** matches the isolated build. Audio/controller/presets protected by static helper, daemon active PID12863/NRestarts0. No native bundle/daemon change or restart; all source unstaged.
 
+### [DES-FOUR-REFINEMENTS] Approved touch, save and library refinements
+
+At 2026-10-08T00:57:27.000Z, Rix approved all four proposed improvements, with a surgical Git checkpoint first. The existing work is now preserved in nine local commits on `patch/tone3000-stage-tools`, ending at `9f67750`; a private SHA-256 manifest confirms all108 original files match the final committed tree exactly. Shared native host contracts are one coherent commit; audio recovery, overlay, artwork, status, Rx tools, pre-touch UI, touch editor and sprint evidence are separate checkpoints. Intermediate pre-touch TypeScript/build and98 tests pass; complete UI115 tests/build pass; audio recovery policy ASan/UBSan1038 assertions/four cases pass. No Git push or device change during checkpoint.
+
+- [7.28] adds an explicit Fine toggle to the existing shared touch dialog. Relative drag sensitivity is10× lower, latched at pointer-down; native scale/range/step, +/- increments, exact Restore,30Hz coalescing and stale-owner guards remain intact. Reset Fine on a new editor session. Toggling during a gesture must not jump the field.
+- [7.29] derives unapplied block/settings/defaults drafts from their accepted baselines instead of permanently setting dirty flags. Preserve incomplete/invalid numeric drafts, including NaN; exact Restore of all fields clears pending guidance. Display distinct Unapplied edits, Applied/changed unsaved and Saved states using authoritative PiPedal preset dirtiness. A visible Save preset beside Apply uses existing `saveCurrentPreset`; disable it for unapplied edits, stale/waiting/disconnected/busy state or wrong owner. It saves the whole current PiPedal preset, with wording saying so; no implicit Apply/Save and no optimistic Saved acknowledgement. Bank/preset/snapshot/full-board/connection changes invalidate queued actions; a same-owner full-board replacement reconciles state from the server before re-enabling Save. Saving device defaults remains separate.
+- [7.30] adds All/Saved/New/Updates filters using existing imports/source hashes, combined with text search. Saved includes copies with changed sources; Updates means at least one saved copy has a different source hash. Within Saved, current rig entries rank first without changing operation targets. Saved copies show bank names resolved from PiPedal's existing observable bank index (the current native Library payload contains bank IDs, not bank names), retaining an honest fallback if unavailable; bank names participate in search. Read-only refreshes and bank changes keep filter/search state and exact target identities.
+- [7.31] adds a collapsed Show routing section to each source/saved-target Preview. Reuse `Tone3000ChainView` without interactive parent/block handlers, preserve explanatory text, names/counts, unsupported routing fallback and narrow horizontal scrolling. The renderer uses an isolated display board; preview still never loads audio, mutates host structure or writes state.
+
+Frontend-only implementation and guarded static publication preserve actual saved/current Rx rigs, audio settings, MIDI configuration and installed native/plugin bytes. Add the missing CMake dependencies for the existing avatar and touch modules plus any new helpers so native builds refresh frontend artifacts correctly. Verify production component/lifecycle paths, all frontend tests/build and actual served desktop/narrow visuals. Physical phone and listening acceptance remain Human gates. Native Patch ownership tokens, gapless switching and phrase recording remain outside these four refinements.
+
 <!-- SPRINT-SECTION-END: DESIGN -->
 
 ---
@@ -1875,6 +1886,39 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 - [x] Agent: implement shared touch editor, validated scales/steps, guarded live Patch changes and local-draft integration; verify production paths/regressions/build and rendered desktop/narrow UI; deploy statics preserving owner rig/settings.
 - [ ] Human: accept physical Fold4/iPhone XR keyboard suppression, slider precision/scroll/focus and live listening behavior.
 
+#### [7.28] Add Fine relative-slider mode
+
+<!-- files: vite/src/pipedal/Tone3000TouchEditor.tsx, vite/src/pipedal/Tone3000TouchMath.ts, vite/tests/Tone3000TouchEditor.test.mjs -->
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-16] [DES-FOUR-REFINEMENTS] -->
+
+- [ ] Agent: add latched10× fine drag without changing native step/range or preview/Restore boundaries; verify production pointer and lifecycle paths.
+- [ ] Human: accept Fine precision on the physical phone.
+
+#### [7.29] Clarify draft, applied and saved states
+
+<!-- files: vite/src/pipedal/Tone3000RigPanel.tsx, vite/src/pipedal/Tone3000EditState.ts, vite/tests/Tone3000EditState.test.mjs -->
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-3] [FR-4] [FR-12] [FR-13] [DES-FOUR-REFINEMENTS] -->
+
+- [ ] Agent: clear pending prompts after complete draft Restore; expose guarded whole-preset Save beside Apply, following authoritative dirty state and owner/capture readiness.
+- [ ] Human: accept Apply/Save guidance during rehearsal editing.
+
+#### [7.30] Filter Library and identify saved bank locations
+
+<!-- files: vite/src/pipedal/Tone3000Library.ts, vite/src/pipedal/Tone3000LibraryDialog.tsx, vite/tests/Tone3000LibraryFilters.test.mjs -->
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-FOUR-REFINEMENTS] -->
+
+- [ ] Agent: combine All/Saved/New/Updates with search, current-first Saved order and observable bank locations without changing mutation targets or guards.
+- [ ] Human: accept filters/search/location usability on the phone.
+
+#### [7.31] Preview source and target routing using PiPedal chain view
+
+<!-- files: vite/src/pipedal/Tone3000PresetPreviewDialog.tsx, vite/src/pipedal/Tone3000ChainView.tsx, vite/tests/Tone3000Preview.test.mjs -->
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-15] [FR-17] [DES-FOUR-REFINEMENTS] -->
+
+- [ ] Agent: add collapsed noninteractive routing preview with mono/stereo/shared/unsupported checks and preserved read-only confirm workflow.
+- [ ] Human: accept the routing Preview on the phone.
+
+
 ### Cross-Reference Index
 
 | Tasks                  | Spec requirements                                                        | Design sections                                                              |
@@ -1896,6 +1940,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 | [7.20]–[7.22] | [FR-3], [FR-4], [FR-6], [FR-18], [FR-19], [FR-24], [NFR-6] | [DES-STABILITY-REVIEW], [DES-STATE], [DES-OPERATE], [DES-TEST], [DES-ROLLOUT], [DES-STAGE-BANK], [DES-RECOVERY] |
 | [7.26] | [FR-4], [FR-13] | [DES-VISIBLE-APPLY] |
 | [7.27] | [FR-4], [FR-13], [FR-16] | [DES-TOUCH-EDITOR] |
+| [7.28]–[7.31] | [FR-3], [FR-4], [FR-11], [FR-12], [FR-13], [FR-15], [FR-16], [FR-17] | [DES-FOUR-REFINEMENTS] |
 | [7.25] | [FR-4], [FR-11], [FR-12], [FR-21] | [DES-PLAIN-TOOLS] |
 | [7.24] | [FR-4], [FR-16], [FR-17], [FR-18], [FR-21] | [DES-STABILITY-REVIEW], [DES-CONTROL-SCOPE], [DES-FOLD-GEAR] |
 | [7.23] | [FR-3], [FR-19], [FR-20] | [DES-STABILITY-REVIEW], [DES-STAGE-BRIDGE], [DES-STATE], [DES-RECOVERY] |
