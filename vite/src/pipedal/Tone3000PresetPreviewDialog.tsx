@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 import { useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import DialogActions from "@mui/material/DialogActions";
@@ -17,6 +18,7 @@ import { Tone3000PreviewReader } from "./Tone3000PreviewReader";
 import type { Tone3000PreviewRead } from "./Tone3000PreviewReader";
 import { tone3000GearLabel } from "./Tone3000Gear";
 import { tone3000NumberPresentation } from "./Tone3000ControlUnits";
+import Tone3000ChainView from "./Tone3000ChainView";
 
 // Stored block gain uses the same native normalized -24..24 dB scale as Input/Output.
 const blockGain = tone3000NumberPresentation("https://www.tone3000.com/plugin:inputLevel", 0, 1)!;
@@ -24,6 +26,7 @@ const blockGain = tone3000NumberPresentation("https://www.tone3000.com/plugin:in
 /** Stored blocks and real-unit EQ only; opaque assets remain on the server.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [7.1]
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-STABILITY-REVIEW] [7.24]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [FR-17] [DES-FOUR-REFINEMENTS] [7.31]
  */
 function StoredChain({ title, state }: { title: string; state: Tone3000PreviewState }) {
     const summary = state.summary;
@@ -34,6 +37,12 @@ function StoredChain({ title, state }: { title: string; state: Tone3000PreviewSt
         <Typography variant="caption" component="p">Counts include all cached variants and disabled blocks; asset presence does not prove audio readiness.</Typography>
         <Typography variant="body2" sx={{ mt: 1 }}>Routing: {summary.stereoEnabled ? "two lanes" : "single lane"}
             {summary.branchAfterBlockId ? ", branch on " + summary.branchSide + " after " + summary.branchAfterBlockId : ""}</Typography>
+        <Box component="details" aria-label={title + " routing"} sx={{ mt: .5 }}>
+            <Box component="summary" sx={{ minHeight: 44, cursor: "pointer", py: 1, boxSizing: "border-box" }}>Show routing</Box>
+            <Box sx={{ minWidth: 0, maxWidth: "100%", overflowX: "auto" }}>
+                <Tone3000ChainView summary={summary} heading={title + " routing · Read only"} ariaLabel={title + " routing diagram"} />
+            </Box>
+        </Box>
         {summary.blocks.length === 0 && <Typography variant="body2">Empty chain</Typography>}
         {summary.blocks.map(block => <Stack key={block.blockId} spacing={.5} sx={{ mt: 1.5 }}>
             <Typography variant="body2" fontWeight={600}>{block.lane} {block.index + 1}: {block.title || (block.type === "insert" ? "Insert slot" : block.type.toUpperCase())}
@@ -103,8 +112,10 @@ export default function Tone3000PresetPreviewDialog({ selection, onClose, onConf
                         {result.hasSnapshotOverrides && <Alert severity="warning">Snapshots retain their saved tone versions and may override the updated tone when recalled.</Alert>}
                     </> : selection?.action !== "preview" && <Typography variant="body2">Add saves a complete new rig in TONE3000 Library without loading it. Device processing defaults apply; source tone, routing and embedded blocks are retained.</Typography>}
                     {result.targetState && !updating && <Alert severity="info">The target is saved state. Unsaved active edits are not included in this preview.</Alert>}
-                    <StoredChain title="Source" state={result.sourceState} />
-                    {result.targetState && <StoredChain title={"Saved target: " + result.targetName} state={result.targetState} />}
+                    <StoredChain key={"source/" + result.key + "/" + result.sha256} title="Source" state={result.sourceState} />
+                    {result.targetState && <StoredChain key={"target/" + result.key + "/" + result.sha256 + "/" + selection?.target?.bankId
+                        + "/" + selection?.target?.presetId + "/" + selection?.target?.instanceId + "/" + selection?.target?.sha256}
+                        title={"Saved target: " + result.targetName} state={result.targetState} />}
                 </>}
             </Stack>
         </DialogContent>

@@ -15,12 +15,15 @@ import { tone3000GearIcon, tone3000LogoIcon } from "./Tone3000Gear";
 /** Reuse PiPedal's renderer on an isolated local board; no RPCs or setters.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-OPERATE] [3.15]
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-FOLD-GEAR] [7.13]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [FR-17] [DES-FOUR-REFINEMENTS] [7.31]
  */
-export default function Tone3000ChainView({ summary, embedded = false, onLayout, onBlockClick, focusedBlockId, parent }: {
+export default function Tone3000ChainView({ summary, embedded = false, onLayout, onBlockClick, focusedBlockId, parent,
+    heading = "Current embedded chain · Read only", ariaLabel = "Current TONE3000 embedded chain" }: {
     summary: Tone3000Summary; embedded?: boolean; onLayout?: (layout: PedalboardDisplayLayout) => void;
     onBlockClick?: (blockId: string) => void;
     focusedBlockId?: string;
     parent?: { pluginType: PluginType; selected: boolean; onClick: () => void };
+    heading?: string; ariaLabel?: string;
 }) {
     try {
         const projection = projectTone3000Chain(summary);
@@ -78,8 +81,8 @@ export default function Tone3000ChainView({ summary, embedded = false, onLayout,
                 if (blockId !== undefined) onBlockClick?.(blockId);
             } : undefined} />;
         if (embedded) return <Box aria-label="Read-only embedded blocks" sx={{ width: "max-content" }}>{diagram}</Box>;
-        return <Box component="section" aria-label="Current TONE3000 embedded chain" sx={{ minWidth: 0 }}>
-            <Typography variant="subtitle1">Current embedded chain · Read only</Typography>
+        return <Box component="section" aria-label={ariaLabel} sx={{ minWidth: 0 }}>
+            <Typography variant="subtitle1">{heading}</Typography>
             <Typography variant="body2" color="text.secondary">{projection.routing} · Input: {summary.inputMode}</Typography>
             <Box sx={{ overflowX: "auto", maxWidth: "100%" }}>
                 {diagram}
