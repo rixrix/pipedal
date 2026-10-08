@@ -25,6 +25,10 @@
 #include <map>
 #include <memory>
 #include <fstream>
+#include "Lv2Pedalboard.hpp"
+#include "JackConfiguration.hpp"
+#include "Tone3000MixMatch.hpp"
+#include "Tone3000Performance.hpp"
 
 extern char **environ;
 
@@ -943,4 +947,324 @@ TEST_CASE("TONE3000 actual-host supplied full-state DSP diagnostic", "[.][gig_ri
                   << " (separate instance; does not exercise service board switching)\n";
         REQUIRE(stateDifference > 0.0001);
     }
+}
+
+namespace {
+/** Offline real host graph; no audio device, preset store or daemon operations.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [DES-MIX-MATCH] [7.34] [7.37]
+ */
+class MixMatchGraph {
+    PluginHost& host;
+    std::unique_ptr<Lv2Pedalboard> graph;
+    RingBuffer<false,true> ring{65536,false};
+    RealtimeRingBufferWriter writer{&ring};
+    HostRingBufferReader reader{&ring};
+    float input[2][64]{},output[2][64]{};
+    std::map<LV2_URID,float> patchValues;
+    uint64_t token=100;
+public:
+    struct Observation {
+        std::vector<float> samples;
+        double rms=0,tailRms=0,meanRunUs=0,maxRunUs=0;
+        float peak=0;
+        std::string hash;
+    };
+    MixMatchGraph(PluginHost& host,Pedalboard board):host(host){
+        Lv2PedalboardErrorList errors;
+        graph.reset(host.CreateLv2Pedalboard(board,errors));
+        for(const auto& error:errors)std::cout<<"Mix-match graph construction error: "<<error.message<<'\n';
+        REQUIRE(errors.empty());REQUIRE(graph);
+        REQUIRE(graph->GetNumberOfAudioInputChannels()==2);REQUIRE(graph->GetNumberOfAudioOutputChannels()==2);
+        graph->Activate();
+    }
+    ~MixMatchGraph(){if(graph)graph->Deactivate();}
+    double Run(Lv2Effect* patchEffect=nullptr,LV2_URID requestedProperty=0){
+        float* in[]{input[0],input[1]};float* out[]{output[0],output[1]};
+        graph->ResetAtomBuffers();
+        if(patchEffect)patchEffect->RequestPatchProperty(requestedProperty);
+        const auto started=std::chrono::steady_clock::now();
+        const bool processed=graph->Run(in,out,64,&writer);
+        const auto elapsed=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-started).count();
+        REQUIRE(processed);
+        if(patchEffect){
+            const auto* sequence=reinterpret_cast<const LV2_Atom_Sequence*>(patchEffect->GetAtomOutputBuffer());REQUIRE(sequence);
+            REQUIRE(sequence->atom.type==host.GetLv2Urid(LV2_ATOM__Sequence));REQUIRE(sequence->atom.size>=sizeof(LV2_Atom_Sequence_Body));
+            REQUIRE(sequence->atom.size+sizeof(LV2_Atom)<=host.asIHost()->GetAtomBufferSize());
+            LV2_ATOM_SEQUENCE_FOREACH(sequence,event){
+                if(event->body.type!=host.GetLv2Urid(LV2_ATOM__Object)&&event->body.type!=host.GetLv2Urid(LV2_ATOM__Blank))continue;
+                REQUIRE(event->body.size>=sizeof(LV2_Atom_Object_Body));
+                const auto* object=reinterpret_cast<const LV2_Atom_Object*>(&event->body);
+                if(object->body.otype!=host.GetLv2Urid(LV2_PATCH__Set))continue;
+                const LV2_Atom *property=nullptr,*value=nullptr;lv2_atom_object_get(object,host.GetLv2Urid(LV2_PATCH__property),&property,host.GetLv2Urid(LV2_PATCH__value),&value,0);
+                REQUIRE(property);REQUIRE(value);REQUIRE(property->type==host.GetLv2Urid(LV2_ATOM__URID));REQUIRE(property->size==sizeof(LV2_URID));
+                REQUIRE(value->type==host.GetLv2Urid(LV2_ATOM__Float));REQUIRE(value->size==sizeof(float));
+                patchValues[reinterpret_cast<const LV2_Atom_URID*>(property)->body]=reinterpret_cast<const LV2_Atom_Float*>(value)->body;
+            }
+        }
+        while(reader.readSpace()){
+            RingBufferCommand command;reader.read(&command);uint64_t id;reader.read(&id);
+            if(command==RingBufferCommand::Lv2StateChanged||command==RingBufferCommand::MaybeLv2StateChanged)continue;
+            if(command==RingBufferCommand::AtomOutput){LV2_Atom atom;reader.read(&atom);REQUIRE(atom.size<=65536);std::vector<uint8_t> body(atom.size);reader.read(body.size(),body.data());continue;}
+            if(command==RingBufferCommand::Lv2ErrorMessage){std::string error;char c;do{reader.read(&c);if(c)error+=c;REQUIRE(error.size()<16384);}while(c);FAIL("Actual graph plugin/worker error: "+error);}
+            FAIL("Unexpected actual graph ring-buffer message");
+        }
+        bool finite=true;for(auto& channel:output)for(float x:channel)finite=finite&&std::isfinite(x);REQUIRE(finite);
+        return elapsed;
+    }
+    json_variant Runtime(Lv2Effect& effect,const std::chrono::steady_clock::time_point& until){
+        const auto request=++token;REQUIRE(effect.SubmitTone3000Stage(request,TONE3000_STAGE_RUNTIME,{})==0);
+        while(std::chrono::steady_clock::now()<until){
+            Run();std::string raw;const auto size=effect.ReadTone3000Stage(request,raw);REQUIRE(size>=0);
+            if(size){auto response=Tone3000Stage::Result(raw);if(Tone3000Stage::Terminal(response)){REQUIRE(response["state"].as_string()=="done");REQUIRE(response["runtime"].is_object());return response["runtime"];}}
+            std::this_thread::sleep_for(std::chrono::microseconds(1333));
+        }
+        FAIL("Headless runtime bridge did not respond before the load deadline");return {};
+    }
+    void WaitLoaded(Pedalboard& board){
+        const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+        for(auto* item:board.GetAllPlugins())if(item->uri()==Tone3000Preset::PLUGIN_URI){
+            auto* effect=dynamic_cast<Lv2Effect*>(graph->GetEffect(item->instanceId()));REQUIRE(effect);
+            const auto expected=Tone3000Preset::SummarizeState(item->lv2State());
+            std::set<std::string> wanted;for(const auto& block:expected.blocks_)if(block.type_!="insert"&&block.enabled_)wanted.insert(block.blockId_);
+            REQUIRE_FALSE(wanted.empty());bool loaded=false;
+            while(std::chrono::steady_clock::now()<until){
+                auto runtime=Runtime(*effect,until);REQUIRE(runtime["audioActive"].as_bool());REQUIRE_FALSE(runtime["truncated"].as_bool());
+                REQUIRE(runtime["blocks"].is_array());std::set<std::string> actual;bool ready=true;
+                for(const auto& block:*runtime["blocks"].as_array())if(block["enabled"].as_bool()){
+                    actual.insert(block["blockId"].as_string());
+                    const auto& fields=*block.as_object();
+                    ready=ready&&fields.contains("loaded")&&block["loaded"].as_bool()
+                        &&(!fields.contains("modelLoading")||!block["modelLoading"].as_bool());
+                    if(fields.contains("loadFailed"))REQUIRE_FALSE(block["loadFailed"].as_bool());
+                }
+                if(ready&&actual==wanted){loaded=true;break;}
+                for(int i=0;i<75;++i){Run();std::this_thread::sleep_for(std::chrono::microseconds(1333));}
+            }
+            REQUIRE(loaded);
+        }
+    }
+    void VerifyParameters(Pedalboard& board){
+        const auto properties=NumericProperties(*host.GetPluginInfo(Tone3000Preset::PLUGIN_URI));
+        const std::string prefix=std::string(Tone3000Preset::PLUGIN_URI)+":";
+        for(auto* item:board.GetAllPlugins()){
+            auto* effect=dynamic_cast<Lv2Effect*>(graph->GetEffect(item->instanceId()));
+            if(item->uri()==Tone3000Preset::PLUGIN_URI){
+                REQUIRE(effect);Lv2PluginState actual;REQUIRE(effect->GetLv2State(&actual));REQUIRE(actual.isValid_);
+                for(const auto& property:properties){
+                    REQUIRE(property.uri().starts_with(prefix));const auto id=property.uri().substr(prefix.size());
+                    const auto wanted=Tone3000Preset::ParameterValue(item->lv2State(),id);
+                    const auto observed=Tone3000Preset::ParameterValue(actual,id);
+                    INFO("Actual full-state parameter instance="<<item->instanceId()<<" id="<<id<<" expected="<<wanted<<" actual="<<observed);
+                    REQUIRE(std::isfinite(observed));REQUIRE(std::abs(observed-wanted)<=std::max(1e-6,std::abs(wanted)*1e-6));
+                    const auto urid=host.GetLv2Urid(property.uri().c_str());patchValues.clear();
+                    for(int attempt=0;attempt<64&&!patchValues.contains(urid);++attempt){Run(effect,urid);std::this_thread::sleep_for(std::chrono::microseconds(1333));}
+                    REQUIRE(patchValues.contains(urid));const auto live=patchValues.at(urid);
+                    INFO("Actual Patch Get value="<<live);REQUIRE(std::isfinite(live));REQUIRE(std::abs(live-wanted)<=std::max(1e-6,std::abs(wanted)*1e-6));
+                }
+                REQUIRE(Tone3000Preset::SummarizeState(actual).inputMode_==Tone3000Preset::SummarizeState(item->lv2State()).inputMode_);
+                std::cout<<"Mix-match actual full-state capture: instance="<<item->instanceId()<<" matchedCapturedParameters=43/43 matchedLivePatchGets=43/43\n";
+            }else if(item->uri()==Tone3000MixMatch::PITCH_URI){
+                REQUIRE(effect);REQUIRE(item->controlValues().size()==6);
+                for(const auto& control:item->controlValues()){const int index=effect->GetControlIndex(control.key());REQUIRE(index>=0);REQUIRE(effect->GetControlValue(index)==control.value());}
+            }
+        }
+    }
+    Observation Render(bool antiphase){
+        Observation result;double sum=0,tail=0,runTotal=0;size_t tailCount=0;
+        // One second of deterministic excitation, then two seconds of silence;
+        // warmup is separate and no fixed sleep is accepted as model readiness.
+        for(size_t block=0;block<2250;++block){
+            for(size_t n=0;n<64;++n){const double t=(block*64+n)/48000.;const float signal=block<750?.12f*std::sin(2*3.141592653589793*110*t)+.04f*std::sin(2*3.141592653589793*317*t):0;
+                input[0][n]=signal;input[1][n]=antiphase?-signal:.35f*signal;}
+            auto elapsed=Run();runTotal+=elapsed;result.maxRunUs=std::max(result.maxRunUs,elapsed);
+            for(auto& channel:output)for(float sample:channel){result.samples.push_back(sample);sum+=double(sample)*sample;result.peak=std::max(result.peak,std::abs(sample));if(block>=1500){tail+=double(sample)*sample;++tailCount;}}
+            // Feed native asynchronous workers at the actual 64/48k cadence.
+            std::this_thread::sleep_for(std::chrono::microseconds(1333));
+        }
+        result.rms=std::sqrt(sum/result.samples.size());result.tailRms=std::sqrt(tail/tailCount);result.meanRunUs=runTotal/2250;
+        REQUIRE(std::isfinite(result.rms));REQUIRE(result.rms>1e-6);REQUIRE(std::isfinite(result.tailRms));
+        result.hash=AesDigest(std::string(reinterpret_cast<const char*>(result.samples.data()),result.samples.size()*sizeof(float)));
+        return result;
+    }
+    void Warm(){for(int i=0;i<750;++i){Run();std::this_thread::sleep_for(std::chrono::microseconds(1333));}}
+};
+double MixMatchResidual(const MixMatchGraph::Observation& a,const MixMatchGraph::Observation& b){
+    REQUIRE(a.samples.size()==b.samples.size());double sum=0;for(size_t i=0;i<a.samples.size();++i){auto d=double(a.samples[i])-b.samples[i];sum+=d*d;}
+    return std::sqrt(sum/a.samples.size());
+}
+struct MixMatchAlignment{int lag=0;double correlation=0,residual=0;bool atBoundary=false;};
+// Observations append each 64-frame L block followed by its R block. Search in
+// frame units, not vector-index units, and never rescale either waveform.
+MixMatchAlignment AlignMixMatch(const MixMatchGraph::Observation& a,const MixMatchGraph::Observation& b,int limit=2048){
+    REQUIRE(a.samples.size()==b.samples.size());REQUIRE(a.samples.size()%128==0);REQUIRE(limit>=0);REQUIRE(limit<=2048);
+    const int frames=static_cast<int>(a.samples.size()/2);REQUIRE(frames>limit);const int window=std::min(frames,48000+limit);
+    auto sample=[](const auto& observation,int frame,int channel){return observation.samples[(frame/64)*128+channel*64+frame%64];};
+    auto correlation=[&](int lag,int stride){double dot=0,left=0,right=0;const int begin=std::max(0,-lag),end=std::min(window,frames-lag);
+        for(int frame=begin;frame<end;frame+=stride)for(int channel=0;channel<2;++channel){const double x=sample(a,frame,channel),y=sample(b,frame+lag,channel);dot+=x*y;left+=x*x;right+=y*y;}
+        return left>0&&right>0?dot/std::sqrt(left*right):-1.;};
+    MixMatchAlignment result;result.correlation=-2;
+    // Exhaust every permitted integer lag at 1/8 sampling, then evaluate the
+    // nearby peak at full sampling. This bounds offline work on the Pi.
+    for(int lag=-limit;lag<=limit;++lag){const auto score=correlation(lag,8);if(score>result.correlation){result.correlation=score;result.lag=lag;}}
+    const int coarse=result.lag;result.correlation=-2;
+    for(int lag=std::max(-limit,coarse-4);lag<=std::min(limit,coarse+4);++lag){const auto score=correlation(lag,1);if(score>result.correlation){result.correlation=score;result.lag=lag;}}
+    double sum=0;size_t count=0;for(int frame=std::max(0,-result.lag);frame<std::min(frames,frames-result.lag);++frame)for(int channel=0;channel<2;++channel){const double d=double(sample(a,frame,channel))-sample(b,frame+result.lag,channel);sum+=d*d;++count;}
+    REQUIRE(count>0);result.residual=std::sqrt(sum/count);result.atBoundary=std::abs(result.lag)==limit;
+    return result;
+}
+}
+
+/** Pure measurement check: lag is in audio frames; level differences stay real.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [7.37]
+ */
+TEST_CASE("Mix-match lag diagnostic preserves level differences", "[gig_rig][gig_rig_mixmatch_alignment][Build]"){
+    MixMatchGraph::Observation a,b;constexpr int frames=4096;a.samples.resize(frames*2);b.samples.resize(frames*2);
+    auto index=[](int frame,int channel){return (frame/64)*128+channel*64+frame%64;};uint32_t random=1;
+    for(int frame=0;frame<frames;++frame)for(int channel=0;channel<2;++channel){random=random*1664525u+1013904223u;a.samples[index(frame,channel)]=(int32_t(random)/2147483648.f)*.1f;}
+    for(int frame=7;frame<frames;++frame)for(int channel=0;channel<2;++channel)b.samples[index(frame,channel)]=a.samples[index(frame-7,channel)];
+    auto aligned=AlignMixMatch(a,b,32);REQUIRE(aligned.lag==7);REQUIRE(aligned.correlation==Approx(1));REQUIRE(aligned.residual==0);REQUIRE_FALSE(aligned.atBoundary);
+    for(auto& sample:b.samples)sample*=.5f;aligned=AlignMixMatch(a,b,32);REQUIRE(aligned.lag==7);REQUIRE(aligned.correlation==Approx(1));REQUIRE(aligned.residual>.02);
+    auto negative=AlignMixMatch(b,a,32);REQUIRE(negative.lag==-7);REQUIRE(negative.residual>.02);
+}
+
+/** Requires an explicit disposable saved source, installed candidate bundles and
+ * a fresh HOME. Reports DSP differences and wall timings; never claims listening,
+ * sample equivalence, device latency, live CPU headroom or complete qualification.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [DES-MIX-MATCH] [7.34] [7.37]
+ */
+TEST_CASE("TONE3000 actual-host mixed Amp Cab Pitch graphs", "[.][gig_rig_mixmatch_runtime]"){
+    namespace fs=std::filesystem;
+    const char* home=getenv("HOME");REQUIRE(home);REQUIRE(fs::path(home).is_absolute());REQUIRE(fs::is_directory(home));REQUIRE(fs::is_empty(home));
+    REQUIRE(getenv("PIPEDAL_T3K_TEST_STORAGE"));
+    for(const char* key:{"XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_CACHE_HOME","PIPEDAL_T3K_TEST_STORAGE"})if(const char* value=getenv(key)){
+        auto relative=fs::path(value).lexically_normal().lexically_relative(fs::path(home).lexically_normal());REQUIRE_FALSE(relative.empty());REQUIRE(*relative.begin()!="..");}
+    const char* sourcePath=getenv("PIPEDAL_TONE3000_MIXMATCH_TEST_BOARD");REQUIRE(sourcePath);REQUIRE_FALSE(fs::is_symlink(fs::symlink_status(sourcePath)));REQUIRE(fs::file_size(sourcePath)<=256ull*1024*1024);
+    std::ifstream stream(sourcePath);REQUIRE(stream.good());json_reader input(stream);Pedalboard source;input.read(&source);REQUIRE(input.is_complete());
+    Tone3000MixMatchRequest request;request.bankId_=1;request.presetId_=1;request.expectedRevision_=Tone3000Performance::Revision(source);request.name_="Offline mix-match DSP diagnostic";request.creationId_="12345678-1234-4234-8234-123456789abc";request.confirmAmpHead_=true;
+    size_t tones=0;for(const auto& item:source.items())if(item.uri()==Tone3000Preset::PLUGIN_URI){++tones;request.instanceId_=item.instanceId();
+        for(const auto& block:Tone3000Preset::SummarizeState(item.lv2State()).blocks_){if(block.type_=="nam")request.ampBlockId_=block.blockId_;if(block.type_=="ir")request.cabBlockId_=block.blockId_;}}
+    REQUIRE(tones==1);auto prepared=Tone3000MixMatch::Prepare(source,request,true);
+    PluginHost host;ChannelSelection channels;channels.mainInputChannels()={0,1};channels.mainOutputChannels()={0,1};JackConfiguration config;host.OnConfigurationChanged(config,channels);PrepareHost(host);
+    REQUIRE(host.GetPluginInfo(Tone3000MixMatch::PITCH_URI));
+    auto delayInfo=host.GetPluginInfo("http://two-play.com/plugins/toob-delay");REQUIRE(delayInfo);
+    auto delayed=prepared.board.DeepCopy();auto delay=delayed.MakeEmptyItem();delay.uri(delayInfo->uri());delay.pluginName(delayInfo->name());
+    for(const auto& port:delayInfo->ports())if(port->is_input()&&port->is_control_port())delay.controlValues().emplace_back(port->symbol(),port->default_value());
+    for(const auto& [symbol,value]:std::vector<std::pair<const char*,float>>{{"delay",110},{"level",60},{"feedback",65}}){auto* control=delay.GetControlValue(symbol);REQUIRE(control);control->value(value);}
+    auto cab=std::find_if(delayed.items().begin(),delayed.items().end(),[&](const auto& item){return item.instanceId()==prepared.cabInstanceId;});REQUIRE(cab!=delayed.items().end());delayed.items().insert(cab,delay);
+    const auto sourceRevision=Tone3000Performance::Revision(source);
+    auto pitchOffSource=source.DeepCopy();auto* pitchOffItem=pitchOffSource.GetItem(request.instanceId_);REQUIRE(pitchOffItem);
+    pitchOffItem->lv2State(Tone3000Preset::WithPitchDisabled(pitchOffItem->lv2State()));
+    auto pitchOffRequest=request;pitchOffRequest.expectedRevision_=Tone3000Performance::Revision(pitchOffSource);
+    auto pitchOffPrepared=Tone3000MixMatch::Prepare(pitchOffSource,pitchOffRequest,true);
+    for(bool antiphase:{false,true}){
+        auto render=[&](Pedalboard board){MixMatchGraph graph(host,board);graph.WaitLoaded(board);graph.Warm();graph.VerifyParameters(board);auto observation=graph.Render(antiphase);graph.VerifyParameters(board);return observation;};
+        const auto original=render(source),repeat=render(source),split=render(prepared.board),withDelay=render(delayed);
+        const auto pitchOffOriginal=render(pitchOffSource),pitchOffSplit=render(pitchOffPrepared.board);
+        const auto repeatedResidual=MixMatchResidual(original,repeat),partitionResidual=MixMatchResidual(original,split),delayResidual=MixMatchResidual(split,withDelay);
+        const auto aligned=AlignMixMatch(original,split),pitchOffAligned=AlignMixMatch(pitchOffOriginal,pitchOffSplit);
+        // A deterministic baseline must repeat before assessing derived residuals.
+        REQUIRE(repeatedResidual/std::max(original.rms,repeat.rms)<.0001);
+        REQUIRE(delayResidual>1e-6);REQUIRE(std::abs(withDelay.tailRms-split.tailRms)>1e-8);
+        std::cout<<"Mix-match actual graph DI: antiphase="<<antiphase<<" originalRms="<<original.rms<<" splitRms="<<split.rms<<" delayRms="<<withDelay.rms<<" originalPeak="<<original.peak<<" delayPeak="<<withDelay.peak<<" originalRunMeanUs="<<original.meanRunUs<<" originalRunMaxUs="<<original.maxRunUs<<" repeatedResidual="<<repeatedResidual<<" partitionResidual="<<partitionResidual<<" delayResidual="<<delayResidual<<" splitTailRms="<<split.tailRms<<" delayTailRms="<<withDelay.tailRms
+            <<" splitPeak="<<split.peak<<" splitRunMeanUs="<<split.meanRunUs<<" splitRunMaxUs="<<split.maxRunUs<<" delayRunMeanUs="<<withDelay.meanRunUs<<" delayRunMaxUs="<<withDelay.maxRunUs<<" splitFloatSha256="<<split.hash<<" qualified=false audibleComparison=false deviceLatencyMeasured=false networkIsolationProven=false\n";
+        std::cout<<"Mix-match alignment observation: antiphase="<<antiphase<<" searchLimitFrames=2048 lagFrames="<<aligned.lag<<" correlation="<<aligned.correlation<<" alignedResidual="<<aligned.residual<<" alignedRelativeResidual="<<aligned.residual/original.rms<<" boundary="<<aligned.atBoundary
+            <<" pitchOffOriginalRms="<<pitchOffOriginal.rms<<" pitchOffSplitRms="<<pitchOffSplit.rms<<" pitchOffRawResidual="<<MixMatchResidual(pitchOffOriginal,pitchOffSplit)<<" pitchOffLagFrames="<<pitchOffAligned.lag<<" pitchOffCorrelation="<<pitchOffAligned.correlation<<" pitchOffAlignedResidual="<<pitchOffAligned.residual<<" pitchOffAlignedRelativeResidual="<<pitchOffAligned.residual/pitchOffOriginal.rms<<" pitchOffBoundary="<<pitchOffAligned.atBoundary<<" levelNormalization=false sampleEquivalenceProven=false\n";
+    }
+    REQUIRE(Tone3000Performance::Revision(source)==sourceRevision);
+}
+
+namespace {
+/** Actual mono graph for ordinary LV2 controls. No T3K bridge, device or store.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.35] [7.37]
+ */
+class PitchHostGraph {
+    std::unique_ptr<Lv2Pedalboard> graph;
+    RingBuffer<false,true> ring{65536,false};
+    RealtimeRingBufferWriter writer{&ring};
+    float input[64]{},output[64]{};
+    size_t rendered=0;
+public:
+    PitchHostGraph(PluginHost& host,Pedalboard board){
+        Lv2PedalboardErrorList errors;graph.reset(host.CreateLv2Pedalboard(board,errors));
+        for(const auto& error:errors)std::cout<<"Pitch graph construction error: "<<error.message<<'\n';
+        REQUIRE(errors.empty());REQUIRE(graph);REQUIRE(graph->GetNumberOfAudioInputChannels()==1);REQUIRE(graph->GetNumberOfAudioOutputChannels()==1);graph->Activate();
+    }
+    ~PitchHostGraph(){if(graph)graph->Deactivate();}
+    Lv2Pedalboard& Board(){return *graph;}
+    Lv2Effect& Effect(int64_t id){auto* effect=dynamic_cast<Lv2Effect*>(graph->GetEffect(id));REQUIRE(effect);return *effect;}
+    float Get(int64_t id,const std::string& symbol){auto& effect=Effect(id);const int index=effect.GetControlIndex(symbol);REQUIRE(index>=0);return effect.GetControlValue(index);}
+    void Set(int64_t id,const std::string& symbol,float value){const int index=graph->GetControlIndex(id,symbol);REQUIRE(index>=0);const int effect=graph->GetIndexOfInstanceId(id);REQUIRE(effect>=0);graph->SetControlValue(effect,index,value);}
+    float Latency(int64_t id,int latencyPort){const int effect=graph->GetIndexOfInstanceId(id);REQUIRE(effect>=0);return graph->GetControlOutputValue(effect,latencyPort);}
+    double Render(size_t blocks){
+        double energy=0;
+        for(size_t block=0;block<blocks;++block){
+            for(size_t n=0;n<64;++n){const double t=(rendered+n)/48000.;input[n]=.1f*std::sin(2*3.141592653589793*140*t)+.02f*std::sin(2*3.141592653589793*433*t);}
+            float* inputs[]{input};float* outputs[]{output};graph->ResetAtomBuffers();REQUIRE(graph->Run(inputs,outputs,64,&writer));
+            bool finite=true;for(float sample:output){finite=finite&&std::isfinite(sample);energy+=double(sample)*sample;}REQUIRE(finite);
+            // This plugin has no atom/worker ports. Any message indicates an
+            // unexpected graph notification or plugin error, not success.
+            REQUIRE(ring.readSpace()==0);rendered+=64;
+        }
+        const double rms=std::sqrt(energy/(blocks*64));REQUIRE(std::isfinite(rms));REQUIRE(rms>1e-6);return rms;
+    }
+    void Verify(const Pedalboard& board){
+        for(const auto& item:board.items()){REQUIRE(item.controlValues().size()==6);for(const auto& control:item.controlValues())REQUIRE(Get(item.instanceId(),control.key())==control.value());}
+    }
+    void Capture(Pedalboard& board){
+        for(auto& item:board.items())for(auto& control:item.controlValues())control.value(Get(item.instanceId(),control.key()));
+    }
+};
+struct PitchMidiObservation{int calls=0;uint64_t instance=0;int port=-1;float value=0;};
+void PitchMidiCallback(void* pointer,uint64_t instance,int port,float value){auto& result=*static_cast<PitchMidiObservation*>(pointer);++result.calls;result.instance=instance;result.port=port;result.value=value;}
+}
+
+/** Synthetic host MIDI and JSON/snapshot recall, never owner preset/device access.
+ * Latency assertions cover reported plugin ports, not measured interface latency.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.35] [7.37]
+ */
+TEST_CASE("T3K Pitch actual host MIDI controls saved board and stacked instances", "[.][gig_rig_pitch_host]"){
+    namespace fs=std::filesystem;
+    const char* optIn=getenv("PIPEDAL_T3K_PITCH_HOST_TEST");REQUIRE(optIn);REQUIRE(std::string(optIn)=="1");
+    const char* home=getenv("HOME");REQUIRE(home);REQUIRE(fs::path(home).is_absolute());REQUIRE(fs::is_directory(home));REQUIRE(fs::is_empty(home));
+    const char* display=getenv("DISPLAY");REQUIRE((!display||!*display));const char* storage=getenv("PIPEDAL_T3K_TEST_STORAGE");REQUIRE(storage);
+    for(const char* key:{"XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_CACHE_HOME","PIPEDAL_T3K_TEST_STORAGE"})if(const char* value=getenv(key)){
+        auto relative=fs::path(value).lexically_normal().lexically_relative(fs::path(home).lexically_normal());REQUIRE_FALSE(relative.empty());REQUIRE(*relative.begin()!="..");}
+    const char* path=getenv("LV2_PATH");REQUIRE(path);REQUIRE(*path);const std::string lv2Path(path);
+    PluginHost host;ChannelSelection channels;channels.mainInputChannels()={0};channels.mainOutputChannels()={0};JackConfiguration config;host.OnConfigurationChanged(config,channels);
+    fs::create_directories(storage);host.SetPluginStoragePath(storage);host.setSampleRate(48000);host.asIHost()->SetMaxAudioBufferSize(64);host.LoadLilv(lv2Path.c_str());
+    auto info=host.GetPluginInfo("https://github.com/rixrix/pipedal/plugins/t3k-pitch#mono");REQUIRE(info);
+    const auto& latency=info->getPort("latency");REQUIRE(latency.is_output());REQUIRE(latency.is_control_port());
+    const int latencyPort=latency.index(),semitonesPort=info->getPort("semitones").index();
+    Pedalboard board;board.name("Private Pitch host diagnostic");
+    for(int i=0;i<2;++i){auto item=board.MakeEmptyItem();item.uri(info->uri());item.pluginName(info->name());
+        for(const auto& port:info->ports())if(port->is_input()&&port->is_control_port())item.controlValues().emplace_back(port->symbol(),port->default_value());
+        REQUIRE(item.controlValues().size()==6);item.GetControlValue("enabled")->value(i?1:0);item.GetControlValue("step")->value(0);item.GetControlValue("semitones")->value(i?7.25f:-2.5f);item.GetControlValue("window")->value(i?2:1);item.GetControlValue("tonality")->value(i?12345:20000);
+        board.items().push_back(std::move(item));}
+    const auto first=board.items()[0].instanceId(),second=board.items()[1].instanceId();
+    MidiBinding binding;binding.symbol("semitones");binding.bindingType(BINDING_TYPE_CONTROL);binding.channel(1);binding.control(11);binding.minValue(.25f);binding.maxValue(.75f);board.items()[0].midiBindings().push_back(binding);
+    {
+        PitchHostGraph graph(host,board);graph.Verify(board);const auto rms=graph.Render(100);REQUIRE(graph.Latency(first,latencyPort)==0);REQUIRE(graph.Latency(second,latencyPort)==1008);
+        graph.Set(first,"enabled",1);graph.Render(100);REQUIRE(graph.Latency(first,latencyPort)==768);REQUIRE(graph.Latency(second,latencyPort)==1008);
+        graph.Set(first,"tonality",15000);REQUIRE(graph.Get(second,"tonality")==12345);graph.Set(first,"tonality",20000);
+        PitchMidiObservation callback;uint8_t bytes[]{0xb2,11,127};MidiEvent midi{};midi.size=3;midi.buffer=bytes;
+        graph.Board().OnMidiMessage(midi,&callback,PitchMidiCallback);REQUIRE(callback.calls==0);REQUIRE(graph.Get(first,"semitones")==-2.5f);
+        bytes[0]=0xb1;bytes[2]=0;graph.Board().OnMidiMessage(midi,&callback,PitchMidiCallback);REQUIRE(callback.calls==1);REQUIRE(callback.instance==first);REQUIRE(callback.port==semitonesPort);REQUIRE(callback.value==Approx(-12));REQUIRE(graph.Get(first,"semitones")==Approx(-12));REQUIRE(graph.Get(second,"semitones")==7.25f);
+        bytes[2]=127;graph.Board().OnMidiMessage(midi,&callback,PitchMidiCallback);REQUIRE(callback.calls==2);REQUIRE(callback.value==Approx(12));REQUIRE(graph.Get(first,"semitones")==Approx(12));REQUIRE(graph.Get(second,"semitones")==7.25f);
+        bytes[1]=12;graph.Board().OnMidiMessage(midi,&callback,PitchMidiCallback);REQUIRE(callback.calls==2);
+        graph.Render(100);graph.Capture(board);
+        std::cout<<"Pitch actual mono host: inputs=1 outputs=1 instances=2 sampleRate=48000 reportedLatencyFirstOff=0 firstOn=768 secondOn=1008 sumReportedOn=1776 midiTargeted=true outputRms="<<rms<<" hardwareMidiTested=false interfaceLatencyMeasured=false\n";
+    }
+    auto snapshot=std::make_shared<Snapshot>(board.MakeSnapshotFromCurrentSettings(board));snapshot->name_="Captured Pitch controls";board.snapshots().push_back(snapshot);
+    std::ostringstream saved;json_writer writer(saved);writer.write(board);std::istringstream file(saved.str());json_reader reader(file);Pedalboard restored;reader.read(&restored);REQUIRE(reader.is_complete());
+    REQUIRE(restored.items()[0].midiBindings()==board.items()[0].midiBindings());REQUIRE(restored.items()[1].midiBindings().empty());REQUIRE(restored.snapshots().size()==1);REQUIRE(restored.snapshots()[0]->values_.size()==2);
+    {
+        PitchHostGraph graph(host,restored);graph.Verify(board);graph.Render(100);REQUIRE(graph.Latency(first,latencyPort)==768);REQUIRE(graph.Latency(second,latencyPort)==1008);
+        PitchMidiObservation callback;uint8_t bytes[]{0xb1,11,0};MidiEvent midi{};midi.size=3;midi.buffer=bytes;graph.Board().OnMidiMessage(midi,&callback,PitchMidiCallback);REQUIRE(callback.calls==1);REQUIRE(callback.instance==first);REQUIRE(graph.Get(first,"semitones")==Approx(-12));REQUIRE(graph.Get(second,"semitones")==7.25f);
+    }
+    restored.items()[0].GetControlValue("semitones")->value(-7);restored.items()[1].GetControlValue("window")->value(0);
+    REQUIRE(restored.ApplySnapshot(0,host));
+    {
+        PitchHostGraph graph(host,restored);graph.Verify(board);graph.Render(100);REQUIRE(graph.Latency(first,latencyPort)==768);REQUIRE(graph.Latency(second,latencyPort)==1008);
+    }
+    std::cout<<"Pitch actual host recall: savedJsonControls=12/12 midiBindingRetained=true nativePedalboardSnapshotRebuild=true realtimeSnapshotFastPathTested=false serviceSaveTested=false qualified=false\n";
 }
