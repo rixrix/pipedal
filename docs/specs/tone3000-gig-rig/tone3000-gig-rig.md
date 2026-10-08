@@ -3,9 +3,9 @@ afx: true
 type: SPRINT
 status: Approved
 owner: "@rixrix"
-version: "2.16"
+version: "2.17"
 created_at: "2026-10-03T23:59:54.000Z"
-updated_at: "2026-10-08T04:11:18.000Z"
+updated_at: "2026-10-08T04:48:47.000Z"
 tags: ["tone3000-gig-rig", "sprint", "raspberry-pi", "lv2"]
 approval:
   spec: Approved
@@ -1489,6 +1489,24 @@ Guarded static publishers verify all incoming hashes and publish the entry index
 
 [7.16]/[7.25]/[7.26]/[7.30]/[7.36] bounded Agent follow-up complete; physical phone/listening acceptance stays unchecked. Browser inspection surfaced an aria-hidden/focus warning on modal opening; screen-reader/modal focus behavior remains a follow-up, not qualified by this visual pass. Existing [7.34]/[7.37] experimental audio/recall/rollback/performance and disposable-bank cleanup gates remain open. No release or Git push.
 
+### [DES-LANDSCAPE] Short-screen editing and chain-only view — 2026-10-08T04:24:36.000Z
+
+Rix reports landscape problems and identifies Fold4/iPhoneXR as target devices. Actual serving 844×390 browser reproduction: the chain/toolbar/tabs plus sticky Apply strip leave almost no usable settings area; Library uses desktop 32px outer margins at a wide-but-short viewport, and expanding footer More tools hides its search/rig list. This is a height-budget defect under existing [FR-4]/[NFR-4]/[DES-FOLD-GEAR]/[DES-VISIBLE-APPLY], not an audio/plugin change.
+
+Refine [7.14]/[7.16]/[7.25]/[7.26] under delegated UI approval: below 500px available viewport height, the selected full T3K view uses one parent vertical scroll area. Chain remains present and horizontally navigable but scrolls vertically out of the way with the toolbar; T3K wrapper/content heights become natural. Tabs stay at the top once reached, with Apply below them; block focus measures both bars before scrolling. Explicit T3K-only host wrapper classes avoid selectors tied to anonymous nesting and leave other plugins unchanged. Preserve mounted subscriptions/drafts across rotations. T3K dialogs use the available short-screen height without desktop margins, compact title/action padding and scrollable body. More tools moves into Library content so expanded help cannot consume the fixed footer. Preserve 44px controls and all original write/ownership/review/Save guards. Validate actual short Fold-cover and iPhone landscape representations (including reduced browser-bar height), portrait/desktop/unfolded regression, source/tests/build and guarded static publication with owner preservation. No native/settings/current-rig writes or restart. Spec/Design/Tasks remain Approved under the existing scope; physical device acceptance remains Human work.
+
+Rix explicitly requests a landscape chain-only option for live/gig use (2026-10-08T04:30:36.000Z). Add [7.38] under [FR-4]/[FR-15]/[NFR-4]: a 44px Chain only/Controls toggle in the existing toolbar for landscape windows, including the unfolded Fold. Store preference only in MainPage local state; it changes neither presets nor device policy. Portrait automatically shows Controls; returning to landscape restores the chosen view. Chain-only reuses the full live PiPedal board, including captured T3K internals and external effects; view callbacks are read-only and host structural controls are hidden. The Controls return button remains visible. Keep the editor mounted and hidden, retaining unsaved drafts/subscriptions; controller-driven bank/rig changes still update the diagram. Existing readOnly host renderer currently drops T3K captures, so distinguish synthetic displayBoard rendering from a live read-only board; preserve captured geometry while guarding host/embedded click, double-click and long-click paths. Test production render/handlers for reversible toggle, rotation, retained editor and capture/interaction semantics; verify live view without changing the owner rig. This is a display convenience, not qualification of PiPedal Performance view or gapless switching. Approved under explicit request and standing delegated scope.
+
+Browser lifecycle correction approved under delegated UI fixes — 2026-10-08T04:39:04.000Z: actual refresh testing reproduced the pre-existing AppThemed beforeunload debug alert closing the browser model before navigation commits, leaving a surviving page disconnected. Under [7.38]/[DES-RECOVERY], remove that eager listener and debug alert; close the client on committed pagehide unless the event indicates a persisted page, and retain component-unmount cleanup. This changes browser connection lifecycle only. Exercise the actual production lifecycle and model close methods for canceled navigation, persisted pagehide, committed navigation and listener removal; verify refresh against the serving build. Keep this correction in a separate source commit.
+
+**Agent evidence — 2026-10-08T04:48:47.000Z:** Reproduced the serving Pi UI at 844×390 before correction. Actual isolated Edge visual checks after publication cover 904×344/794×344 Chain-only, rotation to 344×794 and back,896×414 Library and896×320 reduced browser-bar Library/source preview/numeric editor/Soundcheck. Captured stereo gear remains present; an embedded gear click in Chain-only has no effect, editing controls disappear, Controls remains visible and returns without changing selected instance. An expanded JHS card survives the view toggle, with its unchanged saved A2-Full/input 5.183999/output -6 settings. Draft slider was opened/closed untouched; no Apply/Save/Measure/Load/Create operation performed. Focused card heading clears both sticky bars; tabs stay visible while chain/toolbar scroll away. Expanded More tools scrolls with Library rows; fixed Close remains usable. Short preview and touch editor fit without desktop margins. Ordinary portrait, 829×690 unfolded and desktop controls render normally; final Chain-only also verified at 829×690 after extending its availability to all landscape windows. Device emulation briefly inherited browser zoom after a width edit; resetting browser zoom restored the intended 100% inspection scale. These are browser viewport checks, not actual Android/Safari/physical-foot-controller acceptance.
+
+Production-method tests cover retained mounted editor, read-only host/embedded click/double/long handlers, captured versus synthetic board geometry, rotation and a non-T3K selected effect. Navigation tests execute the real AppThemed lifecycle registration and PiPedalModel.close method: canceled navigation and persisted pagehide retain the connection, committed pagehide/unmount close once and remove the listener. Actual serving refresh completes, reconnects and reads saved rig settings without the former debug alert/disconnected-null error. All 156 frontend tests pass, zero skips/failures; TypeScript/Vite production build and git whitespace checks pass. Logs: /private/tmp/pipedal-landscape-final-tests.log and /private/tmp/pipedal-landscape-final-build.log. Scope remains browser presentation/lifecycle; no DSP or native changes.
+
+Guarded static publication receipts at /home/nam/.local/state/pipedal-gig-rig/landscape-final-20261008T0440/publication/ and final /home/nam/.local/state/pipedal-gig-rig/landscape-fold-20261008T0446/publication/ report index_published:true, published_files_verified:true, observed_changed_fields:[] and failure_type:null; private rollback retains prior frontend assets. Final candidate and serving files match: main-DWAvZg6X.js SHA256 1910097489dd47595b467720470250dae59ede0d588658c27252e06ac02ec7ed and main-r2jpk7zJ.css SHA256 87280de8161010d8d716c27d945cc540fd5f7b52128383702488979eb216a9df. Read-only daemon check remains active, SHA256 f97320aed2b98a69fe3370fd75ff55cb9f01c2c18add9b1cbb8193eb9d635343; no restart, native/audio configuration writes or older owner-state restore. Owner's contemporary Rx Stereo Crunch Verb and existing multitab browser were left intact; only isolated review windows closed. Existing stress-setting xrun counters rose during review; this UI pass does not qualify audio performance. [7.38] Agent complete; physical phone/controller Human gate and [7.34]/[7.37] remain open. No Git push or release.
+
+Surgical source checkpoints: `fab2a8c` browser refresh lifecycle, `497327e` short-screen layout/dialogs, `3245ff5` read-only landscape Chain-only and production-renderer checks. Sprint structure/unique requirement/design/task anchors, mapped requirement/design references and all [7.38] file references verify.
+
 <!-- SPRINT-SECTION-END: DESIGN -->
 
 ---
@@ -2147,6 +2165,14 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 - [ ] Agent: build/test actual Linux candidates, preserve consistent private owner/artifact backups, qualify native states/assets/routing/gain/latency/pitch stacks/recall/offline/bundles/rollback and sensible-buffer performance, restore owner state and record failed/unmet gates.
 - [ ] Human: actual phrase listening, physical footswitches/phone, cold-power-cycle and sustained rehearsal acceptance.
 
+#### [7.38] Provide short-landscape editing and a read-only chain-only option
+
+<!-- files: vite/src/pipedal/MainPage.tsx, vite/src/pipedal/PluginControlView.tsx, vite/src/pipedal/PedalboardView.tsx, vite/src/pipedal/Tone3000PedalboardView.tsx, vite/src/pipedal/Tone3000View.tsx, vite/src/pipedal/Tone3000RigPanel.tsx, vite/src/pipedal/Tone3000LibraryDialog.tsx, vite/src/pipedal/Tone3000Actions.css, vite/src/pipedal/AppThemed.tsx, vite/tests/Tone3000Landscape.test.mjs, vite/tests/AppNavigationLifecycle.test.mjs -->
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-15] [NFR-4] [DES-LANDSCAPE] [DES-FOLD-GEAR] [DES-VISIBLE-APPLY] -->
+
+- [x] Agent: correct reproduced short-screen scrolling/dialog defects, add reversible local chain-only display with retained hidden editor/live capture/read-only callbacks, correct premature refresh cleanup, verify production handlers/build and actual landscape/rotation/portrait/desktop UI, publish guarded static assets preserving owner state.
+- [ ] Human: accept Fold4/iPhoneXR physical landscape scrolling, chain-only visibility, rotation and controller-driven chain updates.
+
 ### Cross-Reference Index
 
 | Tasks                  | Spec requirements                                                        | Design sections                                                              |
@@ -2181,6 +2207,8 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 | [4.1]–[4.5]            | [FR-1], [FR-5], [NFR-1]–[NFR-6]                                          | [DES-TEST], [DES-EVIDENCE], [DES-ERR]                                        |
 | [5.1]–[5.4]            | [FR-3], [FR-5], [FR-6], [FR-7], [FR-8], [FR-10], [NFR-5], [NFR-6]        | [DES-UI], [DES-ROLLOUT], [DES-FILES], [DES-SEC], [DES-TEST]                  |
 | [6.1]–[6.4] (deferred) | [FR-1], [FR-2], [FR-3], [FR-4]                                           | [DES-STATE], [DES-DEPS], [DES-UI]                                            |
+
+| [7.38] | [FR-4], [FR-15], [NFR-4] | [DES-LANDSCAPE], [DES-FOLD-GEAR], [DES-VISIBLE-APPLY], [DES-RECOVERY] |
 
 <!-- SPRINT-SECTION-END: TASKS -->
 
@@ -2263,5 +2291,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 | 2026-10-08T03:45:44.000Z | [7.34], [7.37] | Final native replacement / Guarded checks | Fresh owner preservation, final-service refusal/HTTP and original audio-runtime checks pass; exact evidence and remaining experimental qualification in [DES-PITCH-LV2]. | [ ] | [ ] |
 
 | 2026-10-08T04:11:18.000Z | [7.16], [7.25], [7.26], [7.30], [7.36] | Library discovery / Compact actions / Agent verified and deployed | Actual linked Rx names, prominent Mix & Match, scoped compact actions and equal-width filters;150 frontend tests/build and serving desktop/344px/414px checks pass. Exact artifacts/rollback and remaining boundaries in [DES-PITCH-LV2]. | [x] | [ ] |
+
+| 2026-10-08T04:48:47.000Z | [7.38] | Implemented / Agent verified / Static UI deployed | Short-screen scroll/dialog correction, read-only Chain-only for landscape, separate refresh lifecycle fix;156 production frontend tests/build and actual serving viewport/rotation/refresh checks pass. Exact artifact/rollback and remaining physical/controller/audio boundaries in [DES-LANDSCAPE]. | [x] | [ ] |
 
 <!-- SPRINT-SECTION-END: SESSIONS -->
