@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import "./Tone3000Actions.css";
 import { useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
@@ -116,7 +117,7 @@ export default function Tone3000PerformanceDialog({ open, onClose }: { open: boo
      */
     const close = () => { if (!working.current) onClose(); };
     return <>
-        <DialogEx tag="tone3000Performance" open={open} onClose={close} fullWidth maxWidth="sm">
+        <DialogEx className="t3k-controls" tag="tone3000Performance" open={open} onClose={close} fullWidth maxWidth="sm">
             <DialogTitle>Four-switch performance bank</DialogTitle>
             <DialogContent dividers><Stack spacing={2}>
                 <Alert severity="info">Choose four distinct saved rigs in A/B/C/D order. Original banks, effects, snapshots and trims are preserved. Unsaved edits are not copied. Normal follow-defaults processing still applies on Load.</Alert>
@@ -146,7 +147,7 @@ export default function Tone3000PerformanceDialog({ open, onClose }: { open: boo
             </Stack></DialogContent>
             <DialogActions><Button disabled={busy} onClick={close}>Close</Button></DialogActions>
         </DialogEx>
-        <DialogEx tag="tone3000PerformanceUnsaved" open={pendingLoad} onClose={() => setPendingLoad(false)}>
+        <DialogEx className="t3k-controls" tag="tone3000PerformanceUnsaved" open={pendingLoad} onClose={() => setPendingLoad(false)}>
             <DialogTitle>Discard unsaved changes and load?</DialogTitle>
             <DialogContent>Loading replaces the current playing rig and unsaved edits.</DialogContent>
             <DialogActions><Button onClick={() => setPendingLoad(false)}>Cancel</Button><Button onClick={() => { setPendingLoad(false); load(); }}>Discard and load</Button></DialogActions>

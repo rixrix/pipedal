@@ -106,7 +106,7 @@ function fixture(kind) {
         cursor = 0; tree = context.renderComponent({ selection: open ? selection : null, open, active: open, instanceId: 1, onClose: () => { ++closes; } });
         pendingEffects.splice(0).forEach(commit => commit()); return tree;
     };
-    const button = label => nodes(tree).find(node => node.type === "Button" && children(node).includes(label));
+    const button = label => nodes(tree).find(node => node.type === "Button" && (node.props["aria-label"] === label || children(node).includes(label)));
     const dialog = () => nodes(tree).find(node => node.type === "DialogEx" && node.props.tag === "tone3000" + kind);
     const unmount = () => { for (const effect of effects) { effect?.cleanup?.(); if (effect) effect.cleanup = undefined; } };
     render();

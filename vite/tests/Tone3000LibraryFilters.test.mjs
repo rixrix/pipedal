@@ -65,7 +65,7 @@ function fixture() {
     render();
     return { model, writes, render, all: () => nodes(tree),
         cards: () => nodes(tree).filter(node => node.type === "Paper").map(node => node.props.key),
-        button: label => nodes(tree).find(node => node.type === "Button" && children(node).includes(label)),
+        button: label => nodes(tree).find(node => node.type === "Button" && (node.props["aria-label"] === label || children(node).includes(label))),
         setLibrary(next) { value = next; }, cleanup() { effects.forEach(effect => effect?.cleanup?.()); } };
 }
 

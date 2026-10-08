@@ -1,5 +1,6 @@
 // Copyright (c) 2026 PiPedal contributors
 // SPDX-License-Identifier: MIT
+import "./Tone3000Actions.css";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import Alert from "@mui/material/Alert";
@@ -115,7 +116,7 @@ export default function Tone3000TouchEditor(props: Tone3000TouchEditorProps) {
     const display = (value: number) => props.format ? props.format(value) : String(Number(value.toFixed(6)));
     const typed = tone3000DraftNumber(text), typedValid = Number.isFinite(typed) && typed >= props.min && typed <= props.max;
     const close = () => { if (!owns()) return; cancelGesture(); clearPreview(); props.onClose(); };
-    return <DialogEx tag="tone3000TouchEditor" open={props.open} onClose={close} fullWidth maxWidth="sm"
+    return <DialogEx className="t3k-controls" tag="tone3000TouchEditor" open={props.open} onClose={close} fullWidth maxWidth="sm"
         sx={{ "& .MuiDialog-container": { alignItems: "flex-end" }, "& .MuiDialog-paper": { m: 1, width: "calc(100% - 16px)", maxHeight: "calc(100% - 16px)" },
             "& .MuiButton-root": { minHeight: 44 }, "& .MuiDialogTitle-root": { px: 2, py: 1 } }}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>

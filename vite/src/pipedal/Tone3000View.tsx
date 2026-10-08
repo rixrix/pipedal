@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Thomas Rapolani
 // SPDX-License-Identifier: MIT
 
+import "./Tone3000Actions.css";
 import React, { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
@@ -136,7 +137,7 @@ function Tone3000Panel({ host, controls, instanceId }: { host: ICustomizationHos
     if (other.length) tabNames.push("Other");
     const active = tabNames.includes(selected) ? selected : "Tone";
     return (
-        <Box sx={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, pt: 1, pb: 3, boxSizing: "border-box", containerType: "inline-size",
+        <Box className="t3k-controls" sx={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, pt: 1, pb: 3, boxSizing: "border-box", containerType: "inline-size",
             "& .MuiButton-root": { minHeight: 44 },
             "@container (max-width: 440px)": {
                 "& .t3k-section": { flexBasis: "100%", p: 1 },

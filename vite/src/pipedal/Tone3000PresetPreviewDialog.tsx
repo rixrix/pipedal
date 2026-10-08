@@ -1,5 +1,6 @@
 // Copyright (c) 2026 PiPedal contributors
 // SPDX-License-Identifier: MIT
+import "./Tone3000Actions.css";
 import { useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -95,7 +96,7 @@ export default function Tone3000PresetPreviewDialog({ selection, onClose, onConf
         : selection?.action === "addNew" ? "Add as new" : "Add";
     const canConfirm = connected && !read.loading && !!result && !!selection
         && result.sha256 === selection.entry.sha256 && (!updating || !result.hasUnsavedChanges);
-    return <DialogEx tag="tone3000PresetPreview" open={selection !== null} onClose={onClose} fullWidth maxWidth="md"
+    return <DialogEx className="t3k-controls" tag="tone3000PresetPreview" open={selection !== null} onClose={onClose} fullWidth maxWidth="md"
         sx={{ "& .MuiDialog-paper": { m: { xs: 0, sm: 4 }, width: { xs: "100%", sm: "calc(100% - 64px)" },
             minWidth: 0, maxWidth: { xs: "100%", sm: 900 }, maxHeight: { xs: "100%", sm: "calc(100% - 64px)" } },
             "& .MuiButton-root": { minHeight: 44 } }}>

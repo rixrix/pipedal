@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import "./Tone3000Actions.css";
 import { useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
@@ -110,7 +111,7 @@ export default function Tone3000MixMatchDialog({ selection, onClose }: {
     };
     const close = () => { if (!loadFlight.current) onClose(); };
     const locked = read.creating || read.uncertain || !!read.receipt;
-    return <DialogEx tag="tone3000MixMatch" open={!!selection} onClose={close} fullWidth maxWidth="md"
+    return <DialogEx className="t3k-controls" tag="tone3000MixMatch" open={!!selection} onClose={close} fullWidth maxWidth="md"
         sx={{ "& .MuiDialog-paper": { m: { xs: 0, sm: 4 }, width: { xs: "100%", sm: "calc(100% - 64px)" }, maxHeight: { xs: "100%", sm: "calc(100% - 64px)" } },
             "& .MuiButton-root": { minHeight: 44, whiteSpace: "normal" } }}>
         <DialogTitle>Mix & match · Experimental copy</DialogTitle>

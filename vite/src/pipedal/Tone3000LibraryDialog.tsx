@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Thomas Rapolani
 // SPDX-License-Identifier: MIT
 
+import "./Tone3000Actions.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -177,7 +178,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
     const savedCopies = tone3000SavedCopies(library.entries, search, banks);
 
     return <>
-        <DialogEx tag="tone3000Library" open={open} fullWidth maxWidth="md"
+        <DialogEx className="t3k-controls" tag="tone3000Library" open={open} fullWidth maxWidth="md"
             sx={{ "& .MuiDialog-paper": { m: { xs: 0, sm: 4 }, width: { xs: "100%", sm: "calc(100% - 64px)" },
                 maxWidth: { xs: "100%", sm: 900 }, height: { xs: "100%", sm: "auto" },
                 maxHeight: { xs: "100%", sm: "calc(100% - 64px)" }, borderRadius: { xs: 0, sm: 1 } },
@@ -191,11 +192,11 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                 }}>
                 <Stack spacing={2}>
                     <Typography variant="body2" color="text.secondary">
-                        TONE3000 files on this Pi appear here automatically. Saved shows your PiPedal rigs. Add saves a new copy; Load plays it; Update replaces it from T3K.
+                        T3K presets on this Pi appear automatically. Saved shows your PiPedal rigs.
                     </Typography>
-                    <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}>
+                    <Stack direction="row" sx={{ alignItems: "center", flexWrap: "wrap", gap: 1 }}>
                         <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => { void refresh(true); }}>Refresh</Button>
-                        <Button variant="contained" disabled={busy || refreshing || !connected} onClick={() => uploadInput.current?.click()}>Upload presets</Button>
+                        <Button variant="outlined" aria-label="Upload presets" disabled={busy || refreshing || !connected} onClick={() => uploadInput.current?.click()}>Upload</Button>
                         <Button variant="outlined" disabled={busy || refreshing || !connected}
                             onClick={() => { setFilter("saved"); setSearch(""); }}>Mix &amp; Match</Button>
                         {(busy || refreshing) && <CircularProgress size={20} aria-label={busy ? "Applying rig" : "Finding rigs"} />}
@@ -206,21 +207,18 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                                 if (files.length) void upload(files);
                             }} />
                     </Stack>
-                    <Typography variant="caption" color="text.secondary">
-                        Upload complete .t3kpreset rigs. For NAM models or IRs, add them in TONE3000 and save a preset first.
-                    </Typography>
                     {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
                     {recoveryNotice && <Alert severity="warning" onClose={() => setRecoveryNotice("")}>{recoveryNotice}</Alert>}
                     {notice && <Alert severity="success" onClose={() => setNotice("")}>{notice}</Alert>}
                     {library.warnings.map((warning, index) => <Alert severity="warning" key={index}>{warning}</Alert>)}
                     <TextField label="Find a rig or bank" value={search} onChange={event => setSearch(event.target.value)} size="small" fullWidth />
-                    <Stack direction="row" role="group" aria-label="Filter TONE3000 Library" sx={{ flexWrap: "wrap", gap: .5 }}>
+                    <Box className="t3k-library-filters" role="group" aria-label="Filter TONE3000 Library">
                         {([['all', 'All'], ['saved', 'Saved'], ['new', 'New'], ['updates', 'Updates']] as const).map(([value, label]) =>
                             <Button key={value} variant={filter === value ? "contained" : "outlined"} aria-pressed={filter === value}
                                 onClick={() => setFilter(value)}>{label}</Button>)}
-                    </Stack>
+                    </Box>
                     {filter === "saved" && <Typography variant="body2" color="text.secondary">
-                        These are saved PiPedal rigs. Choose Mix &amp; Match beneath a rig to create a separate experimental copy.
+                        Mix &amp; Match makes a separate experimental copy of a saved rig.
                     </Typography>}
                     {filter !== "saved" && <Typography variant="body2" color="text.secondary">
                         Status refers to each T3K source file. Exporting creates another file; it does not remove your saved PiPedal rig.
@@ -238,7 +236,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                             <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
                                 <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => setMixMatch({ entry, target })}>Mix &amp; Match</Button>
                                 <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => load(target)}>Load</Button>
-                                <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, target, action: "preview" })}>Compare with source</Button>
+                                <Button aria-label="Compare with source" disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, target, action: "preview" })}>Compare</Button>
                                 {target.sha256 !== entry.sha256 && <Button disabled={busy || refreshing || !connected}
                                     onClick={() => setPreview({ entry, target, action: "update" })}>{target.active ? "Update & load" : "Update"}</Button>}
                             </Stack>
@@ -256,9 +254,9 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                                 label={!entry.imports.length ? "Available to add" : entry.imports.some(target => target.sha256 !== entry.sha256) ? "Update available" : "Saved in PiPedal"}
                                 color={entry.imports.some(target => target.sha256 !== entry.sha256) ? "warning" : "default"} />
                             <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
-                                <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, action: "preview" })}>Preview source</Button>
-                                <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, action: entry.imports.length ? "addNew" : "add" })}>
-                                    {entry.imports.length ? "Add another copy" : "Add to PiPedal"}
+                                <Button aria-label="Preview source" disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, action: "preview" })}>Preview</Button>
+                                <Button aria-label={entry.imports.length ? "Add another copy" : "Add to PiPedal"} disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, action: entry.imports.length ? "addNew" : "add" })}>
+                                    {entry.imports.length ? "Add copy" : "Add"}
                                 </Button>
                             </Stack>
                             {entry.imports.length > 0 && <Typography variant="subtitle2">Saved PiPedal {entry.imports.length === 1 ? "copy" : "copies"}</Typography>}
@@ -269,7 +267,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                                     <Typography variant="caption" component="p" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>Bank: {tone3000BankLocation(target.bankId, banks)}</Typography>
                                     {target.sha256 !== entry.sha256 && <Typography variant="caption" color="warning.main">Source changed. Update replaces this saved copy.</Typography>}
                                     <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
-                                        <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, target, action: "preview" })}>Compare with source</Button>
+                                        <Button aria-label="Compare with source" disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, target, action: "preview" })}>Compare</Button>
                                         {target.sha256 !== entry.sha256 && <Button disabled={busy || refreshing || !connected}
                                             onClick={() => setPreview({ entry, target, action: "update" })}>{target.active ? "Update & load" : "Update"}</Button>}
                                         <Button disabled={busy || refreshing || !connected} onClick={() => setMixMatch({ entry, target })}>Mix &amp; match</Button>
@@ -287,6 +285,10 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
             <DialogActions sx={{ px: { xs: 1.5, sm: 3 }, alignItems: "flex-start", gap: 1 }}>
                 <Box component="details" sx={{ flex: 1, minWidth: 0 }}>
                     <Box component="summary" sx={{ minHeight: 44, cursor: "pointer", py: 1, boxSizing: "border-box" }}>More tools</Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        Add saves a new copy; Load plays it; Update replaces it from T3K.
+                        Upload complete .t3kpreset rigs. For separate NAM models or IRs, add them in TONE3000 and save a preset first.
+                    </Typography>
                     <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
                         <Button disabled={busy || !connected} onClick={() => setBundleOpen(true)}>Check rig bundle</Button>
                         <Button disabled={busy || !connected} onClick={() => setPerformanceOpen(true)}>Four-switch setup</Button>
@@ -303,7 +305,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
             if (selection.action === "update" && selection.target) void update(selection.entry, selection.target);
             else if (selection.action === "add" || selection.action === "addNew") void add(selection.entry, selection.action === "addNew");
         }} />
-        <DialogEx tag="tone3000LibraryUnsaved" open={pendingLoad !== null} onClose={() => setPendingLoad(null)}>
+        <DialogEx className="t3k-controls" tag="tone3000LibraryUnsaved" open={pendingLoad !== null} onClose={() => setPendingLoad(null)}>
             <DialogTitle>Load this rig?</DialogTitle>
             <DialogContent><DialogContentText>Your current rig has unsaved changes. Loading replaces those changes.</DialogContentText></DialogContent>
             <DialogActions>

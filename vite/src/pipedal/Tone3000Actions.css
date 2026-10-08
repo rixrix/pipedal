@@ -1,0 +1,31 @@
+/* Copyright (c) 2026 PiPedal contributors; SPDX-License-Identifier: MIT */
+/* Scoped T3K actions. @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md
+   [FR-4] [DES-VISUAL-ALIGN] [DES-PLAIN-TOOLS] [7.16] [7.25] [7.26] */
+.t3k-controls.t3k-controls .MuiButton-root {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.4;
+    text-transform: none;
+    white-space: normal;
+    box-shadow: none;
+}
+.t3k-controls.t3k-controls .MuiButton-root:hover {
+    box-shadow: none;
+}
+.t3k-controls.t3k-controls .MuiButton-root.Mui-focusVisible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+.t3k-controls .t3k-library-filters {
+    display: grid;
+    width: 100%;
+    max-width: 360px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+}
+.t3k-controls .t3k-library-filters .MuiButton-root {
+    padding-inline: 6px;
+}

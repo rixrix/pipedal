@@ -83,7 +83,7 @@ function fixture(section = "Blocks", share = null) {
     const flush = async () => { for (let i = 0; i < 12; ++i) { await Promise.resolve(); render(); } };
     render();
     return { model, current, block, profile, reads, saves, writes, flush, render, registryFactory: context.tone3000EditDrafts,
-        all: () => nodes(tree), button: label => nodes(tree).find(node => node.type === "Button" && (node.props.children ?? []).flat(Infinity).includes(label)),
+        all: () => nodes(tree), button: label => nodes(tree).find(node => node.type === "Button" && (node.props["aria-label"] === label || (node.props.children ?? []).flat(Infinity).includes(label))),
         field: label => nodes(tree).find(node => node.props.label === label),
         blockControl: () => nodes(tree).find(node => node.type === "BlockCard"),
         processing: () => nodes(tree).find(node => node.type === "ProcessingFields"),

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+import "./Tone3000Actions.css";
 import { useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
@@ -80,7 +81,7 @@ export default function Tone3000BundleDialog({ open, onClose }: { open: boolean;
         } catch (failure) { if (token === generation.current) setError(String(failure)); }
         finally { if (token === generation.current) { importing.current = false; setBusy(false); } }
     };
-    return <DialogEx tag="tone3000Bundle" open={open} onClose={() => { if (!importing.current) onClose(); }} fullWidth maxWidth="sm">
+    return <DialogEx className="t3k-controls" tag="tone3000Bundle" open={open} onClose={() => { if (!importing.current) onClose(); }} fullWidth maxWidth="sm">
         <DialogTitle>Check rig bundle</DialogTitle>
         <DialogContent dividers><Stack spacing={2}>
             <Typography variant="body2">Check a .piPreset, .piBank or legacy JSON export without loading or saving it. Current saved bank excludes unsaved edits.</Typography>

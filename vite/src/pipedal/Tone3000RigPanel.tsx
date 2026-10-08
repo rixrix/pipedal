@@ -619,21 +619,21 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
 
     return <DraftTouchContext.Provider value={{ enabled: active && connected && !busy && !waiting && !stale,
         scopeKey: JSON.stringify([instanceId, section, rig?.revision, profileId, defaults?.revision]) }}>
-        <Stack className="t3k-rig-panel" spacing={1.5} sx={{ px: 1, minWidth: 0, maxWidth: 1100,
+        <Stack className="t3k-rig-panel t3k-controls" spacing={1.5} sx={{ px: 1, minWidth: 0, maxWidth: 1100,
         "& .MuiButton-root": { whiteSpace: "normal", minHeight: 44 },
         "& .MuiFormControl-root": { maxWidth: "100%", minWidth: 0 } }}>
         {rig && draft && <Box ref={actionBar} role="region" aria-label={section === "Blocks" ? "Apply block changes" : "Apply rig settings"}
             sx={{ position: "sticky", top: 0, zIndex: 2, bgcolor: "background.paper",
                 borderBottom: 1, borderColor: "divider", p: 1, minWidth: 0 }}>
             <Stack spacing={.5}>
-                <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", rowGap: 1 }}>
-                <Button variant="contained" sx={{ alignSelf: "flex-start" }}
+                <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1 }}>
+                <Button variant="contained" aria-label={section === "Blocks" ? "Apply block changes" : "Apply rig settings"} sx={{ alignSelf: "flex-start" }}
                     disabled={busy || waiting || !connected || stale || !capturedHere || !rigDirty.current
                         || (section === "Blocks" ? !tone3000ValidBlocks(draft.blocks) : !validCalibration(draft.inputCalibrationLevel))}
-                    onClick={() => { void apply(); }}>{section === "Blocks" ? "Apply block changes" : "Apply rig settings"}</Button>
-                <Button variant="outlined" disabled={busy || waiting || !connected || stale || !capturedHere
+                    onClick={() => { void apply(); }}>Apply</Button>
+                <Button variant="outlined" aria-label="Save preset" disabled={busy || waiting || !connected || stale || !capturedHere
                     || pendingSections.length > 0 || rigDirty.current || profileDirty.current || !presets.presetChanged}
-                    onClick={() => { void savePreset(); }}>Save preset</Button>
+                    onClick={() => { void savePreset(); }}>Save</Button>
                 </Stack>
                 <Typography role="status" variant="body2" color="text.secondary">
                     {!connected ? "Reconnect to the Pi before applying changes."
