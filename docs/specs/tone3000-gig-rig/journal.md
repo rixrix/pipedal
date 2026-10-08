@@ -334,3 +334,15 @@ Rix clarified baked amp+cab captures remain intact. [7.32]/[7.33] complete offli
 ### 2026-10-08T01:41:04.000Z — Sprint traceability verification
 
 Corrected three existing missing task references for Stage roadmap, bundle and USB design sections. All32 requirement anchors,40 design anchors and89 parseable task groups are unique and covered; each task retains canonical sprint references. All three approvals remain Approved, with Human audio/rehearsal gates open. Offline codec evidence log refreshed to match the final1645-assertion binary.
+
+### 2026-10-08T01:50:14.000Z — Fact-based mix-and-match plan refined before implementation
+
+Rix requests a concrete plan and facts before further experimental work, and clarifies16×6 is limit testing rather than the required performance setting. Rechecked pinned v0.0.12 processing/ports, current partition/CLI evidence, host graph, Library Update/defaults, four-slot publication and per-instance Soundcheck paths; public release list still marks v0.0.12 Latest. Expanded existing [DES-MIX-MATCH] with a sourced evidence register, six-step authoring/publication/mobile/audio/recall/soak sequence, per-stage processing ownership, mono/stereo consequences and separate surgical commit/rollback plan. Existing delegated approvals remain Approved; [7.34] still pending. No source edits, build/tests, device probe or deployment in this planning turn; prior codec assertions do not qualify the proposed workflow or audio.
+
+### 2026-10-08T02:03:08.000Z — Independent pitch LV2 feasibility
+
+Rix asks about extracting and stacking T3K pitch. Read-only review confirms separate pinned JUCE-based DSP class and external Step/Tonality mappings; candidate standalone LV2 design, dependency/licence provenance, latency/bypass/stacking limits and qualification steps saved inside [DES-MIX-MATCH]. Independent-plugin implementation remains a proposed extension, not part of completed [7.33] or deployed [7.34]. No source build/test/device changes; original rig pitch policy retained.
+
+### 2026-10-08T02:09:47.000Z — Pitch/Amp/Cab implementation explicitly approved
+
+Rix directs implementation and thorough checks. [FR-27]/[DES-PITCH-LV2]/[7.35]–[7.37] refine the earlier candidate, and [7.34] gains the narrow pitch/provenance contract. Spec→Design→Tasks reviewed/approved under explicit direction and standing delegated scope. Three-agent limit respected; nativeauthoring and pitch have disjoint owners. Activepitch migration refuses nonunitygain/enabledgate to preserve ordering; original owner rigs unchanged. Optionalderived metadata, idempotentpublication, offlinebuild/realtime controls and actualPi qualification/rollback contract recorded before source edits.
