@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <tuple>
 #include <vector>
 
 using namespace pipedal;
@@ -192,6 +193,74 @@ namespace
     template<class T> std::string Json(const T &value)
     {
         std::ostringstream out; json_writer writer(out); writer.write(value); return out.str();
+    }
+
+    Bytes AmpAsset(const std::string &gear = "amp")
+    {
+        const auto text = std::string("{\"version\":\"0.7.0\",\"architecture\":\"Linear\",\"config\":{\"receptive_field\":1,\"bias\":false},\"weights\":[1],\"metadata\":{\"gear_type\":\"")
+            + gear + "\",\"input_level_dbu\":12,\"loudness\":-18},\"sample_rate\":48000}";
+        return Bytes(text.begin(), text.end());
+    }
+    void Le(Bytes &bytes, uint64_t value, size_t count)
+    {
+        while (count--) { bytes.push_back(static_cast<uint8_t>(value)); value >>= 8; }
+    }
+    void Put32(Bytes &bytes, size_t offset, uint32_t value)
+    {
+        for (size_t i = 0; i < 4; ++i) bytes[offset + i] = static_cast<uint8_t>(value >> (8 * i));
+    }
+    Bytes CabAsset(uint16_t format = 1, uint16_t channels = 1, uint16_t bits = 16,
+        size_t frames = 8, uint32_t rate = 48000, bool silent = false, bool junk = false)
+    {
+        Bytes bytes{'R','I','F','F',0,0,0,0,'W','A','V','E'};
+        if (junk) Append(bytes, {'J','U','N','K',1,0,0,0,123,0});
+        Append(bytes, {'f','m','t',' ',16,0,0,0});
+        const auto align = channels * bits / 8;
+        Le(bytes,format,2); Le(bytes,channels,2); Le(bytes,rate,4); Le(bytes,rate*align,4);
+        Le(bytes,align,2); Le(bytes,bits,2);
+        Append(bytes, {'d','a','t','a'}); Le(bytes,frames*align,4);
+        for (size_t frame = 0; frame < frames; ++frame) for (size_t channel = 0; channel < channels; ++channel) {
+            const auto value = silent || frame != 0 ? uint64_t(0) : format == 3
+                ? (bits == 32 ? uint64_t(std::bit_cast<uint32_t>(.25f)) : std::bit_cast<uint64_t>(.25)) : uint64_t(123);
+            Le(bytes,value,bits/8);
+        }
+        Put32(bytes,4,static_cast<uint32_t>(bytes.size()-8));
+        return bytes;
+    }
+    Bytes StageBlock(bool amp, const Bytes &asset, const Fields &extra = {}, const std::string &gear = "",
+        bool alternate = true)
+    {
+        Fields fields{{"id",StringValue(amp?"amp-id":"cab-id")}, {"type",StringValue(amp?"nam":"ir")},
+            {"enabled",Variant(2)}, {"normalize",Variant(2)}, {"slimSize",DoubleValue(.75)},
+            {"inputGain",DoubleValue(.35)}, {"outputGain",DoubleValue(.65)}, {"mix",DoubleValue(.9)},
+            {"activeModelId",IntValue(amp?19:20)}, {"toneId",IntValue(amp?7:8)},
+            {"toneJson",StringValue(std::string("{\"gear\":\"") + (gear.empty()?(amp?"amp":"cab"):gear)
+                + "\",\"title\":\"Source block\",\"models\":[{\"id\":" + (amp?"19":"20") + "},{\"id\":21}]}")}};
+        for (const auto &field : extra) {
+            const auto found = std::find_if(fields.begin(),fields.end(),[&](const auto &p){return p.first==field.first;});
+            if (found==fields.end()) fields.push_back(field); else *found=field;
+        }
+        std::vector<Bytes> cache{Node("CachedModel",{{"modelId",IntValue(amp?19:20)},{"data",Variant(8,asset)}})};
+        if (alternate) cache.push_back(Node("CachedModel",{{"modelId",IntValue(21)}, {"data",Variant(8,{'A','L','T',99})}}));
+        return Node("ChainBlock",fields,{Node("Eq",{{"enabled",Variant(2)},{"pre",Variant(2)}},
+            {Node("Band",{{"type",StringValue("lowcut")},{"freqHz",DoubleValue(85)},{"gainDb",DoubleValue(0)},{"q",DoubleValue(.7)}})}),
+            Node("ModelCache",{},cache)});
+    }
+    Lv2PluginState PartitionFixture(const std::vector<Bytes> &blocks = {StageBlock(true,AmpAsset()),StageBlock(false,CabAsset())},
+        const Fields &rootExtra = {}, const Fields &snapshotExtra = {}, const std::vector<Bytes> &params = {},
+        const std::vector<Bytes> &right = {})
+    {
+        Fields root{{"schemaVersion",IntValue(1)},{"activePresetId",StringValue("user:amp-and-cab")},
+            {"activePresetName",StringValue("Original rig")},{"inputMode",StringValue("left")}};
+        Fields snapshot{{"stereoEnabled",Variant(3)},{"branchSide",StringValue("left")},{"branchAfterBlockId",StringValue("")}};
+        for (auto pair : {std::pair(&root,&rootExtra),std::pair(&snapshot,&snapshotExtra)})
+            for (const auto &field : *pair.second) {
+                auto found=std::find_if(pair.first->begin(),pair.first->end(),[&](const auto &p){return p.first==field.first;});
+                if (found==pair.first->end()) pair.first->push_back(field); else *found=field;
+            }
+        return FullState(Node("TONE3000State",root,{Node("PARAMETERS",{},params),
+            Node("MidiMappings",{}, {Node("Mapping",{{"cc",IntValue(64)}})}),
+            Node("ChainSnapshot",snapshot,{Node("ChainBlocks",{},blocks),Node("RightChainBlocks",{},right)})}));
     }
 }
 
@@ -658,4 +727,128 @@ TEST_CASE("Tone3000 preview counts every cached NAM and IR variant in stored sta
     REQUIRE(state.values_.at(Tone3000Preset::STATE_URI).value_==before);
     auto bad=state; bad.values_.at(Tone3000Preset::STATE_URI).value_={'b','a','d',0};
     REQUIRE_THROWS(Tone3000Preset::InspectState(bad));
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-26] [DES-MIX-MATCH] [7.33] */
+TEST_CASE("Offline amp cab partition preserves full blocks and separates DSP ownership", "[gig_rig][gig_rig_codec][tone3000_partition]")
+{
+    const auto amp=StageBlock(true,AmpAsset()), cab=StageBlock(false,CabAsset());
+    const auto insert=Node("ChainBlock",{{"id",StringValue("empty-slot")},{"type",StringValue("insert")}});
+    auto source=PartitionFixture({insert,amp,cab},{},{},{Param("inputLevel",.6,"PARAM"),Param("pitchEnabled",1,"PARAM"),
+        Param("pitchSemitones",-2,"PARAM"),Param("gateThreshold",-65,"PARAM"),Param("calibrateInput",1,"PARAM"),
+        Param("inputCalibrationLevel",17,"PARAM"),Param("targetLoudness",-20,"PARAM"),Param("toneBass",6,"PARAM"),
+        Param("outputLevel",.7,"PARAM")});
+    source.values_["urn:unrelated-private-entry"].value_={1,2,3};
+    const auto before=source;
+    const auto parts=Tone3000Preset::PartitionAmpCab(source,"amp-id","cab-id",true);
+    CHECK(source==before);
+    CHECK(parts.ampBlockId=="amp-id"); CHECK(parts.cabBlockId=="cab-id");
+    const auto ampBytes=StateBytes(parts.ampState), cabBytes=StateBytes(parts.cabState);
+    CHECK(Contains(ampBytes,amp)); CHECK_FALSE(Contains(ampBytes,cab));
+    CHECK(Contains(cabBytes,cab)); CHECK_FALSE(Contains(cabBytes,amp));
+    CHECK_FALSE(Contains(ampBytes,insert)); CHECK_FALSE(Contains(cabBytes,insert));
+    for (const auto *state : {&parts.ampState,&parts.cabState}) {
+        CHECK(state->values_.size()==1); CHECK(state->isValid_);
+        CHECK(state->values_.at(Tone3000Preset::STATE_URI).flags_==3);
+        CHECK(Contains(StateBytes(*state),Node("MidiMappings")));
+        CHECK_FALSE(Contains(StateBytes(*state),TextBytes("Mapping")));
+        const auto summary=Tone3000Preset::SummarizeState(*state);
+        CHECK(summary.blocks_.size()==1); CHECK_FALSE(summary.osEnabled_); CHECK_FALSE(summary.stereoEnabled_);
+        CHECK(summary.branchAfterBlockId_.empty());
+        CHECK(summary.blocks_[0].slimSize_==.75); CHECK(summary.blocks_[0].inputGain_==.35);
+        CHECK(summary.blocks_[0].outputGain_==.65); CHECK(summary.blocks_[0].mix_==.9);
+        CHECK(summary.blocks_[0].normalize_); CHECK(summary.blocks_[0].eq_.pre_);
+        CHECK(summary.blocks_[0].eq_.bands_[0].freqHz_==85);
+    }
+    CHECK(Tone3000Preset::InspectState(parts.ampState).namCount==2);
+    CHECK(Tone3000Preset::InspectState(parts.cabState).irCount==2);
+    CHECK(Tone3000Preset::SummarizeState(parts.ampState).calibrateInput_);
+    CHECK_FALSE(Tone3000Preset::SummarizeState(parts.cabState).calibrateInput_);
+    CHECK(Tone3000Preset::SummarizeState(parts.ampState).inputCalibrationLevel_==17);
+    CHECK(Tone3000Preset::SummarizeState(parts.ampState).activePresetId_!=Tone3000Preset::SummarizeState(parts.cabState).activePresetId_);
+    for (const auto &[id,value] : std::map<std::string,double>{{"inputLevel",.6},{"pitchEnabled",1},{"pitchSemitones",-2},
+        {"gateThreshold",-65},{"targetLoudness",-20},{"toneEqEnabled",0},{"outputLevel",.5},{"chainPanLeft",0},{"chainPanRight",1}})
+        CHECK(Contains(ampBytes,Param(id,value,"PARAM")));
+    for (const auto &[id,value] : std::map<std::string,double>{{"inputLevel",.5},{"pitchEnabled",0},{"gateEnabled",0},
+        {"toneBass",6},{"outputLevel",.7},{"chainPanLeft",0},{"chainPanRight",1}})
+        CHECK(Contains(cabBytes,Param(id,value,"PARAM")));
+    for (const auto &[state,block,id] : {std::tuple(&parts.ampState,&amp,"derived-amp"),std::tuple(&parts.cabState,&cab,"derived-cab")}) {
+        const auto file=Tone3000Preset::ExportPreset(*state,id,id);
+        const auto imported=Tone3000Preset::BuildState(file,std::string(id)+".t3kpreset","user",state);
+        CHECK(Contains(StateBytes(imported),*block)); CHECK(Tone3000Preset::InspectState(imported).modelCount==1);
+    }
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [DES-SEC] [7.33] */
+TEST_CASE("Offline amp cab partition refuses unsupported source identity routing and processing", "[gig_rig][gig_rig_codec][tone3000_partition]")
+{
+    auto partition=[](const Lv2PluginState &state){return Tone3000Preset::PartitionAmpCab(state,"amp-id","cab-id",true);};
+    const auto valid=PartitionFixture();
+    CHECK_THROWS(Tone3000Preset::PartitionAmpCab(valid,"amp-id","cab-id",false));
+    CHECK_THROWS(Tone3000Preset::PartitionAmpCab(valid,"unknown","cab-id",true));
+    CHECK_THROWS(Tone3000Preset::PartitionAmpCab(valid,"amp-id","amp-id",true));
+    CHECK_THROWS(partition(Lv2PluginState{}));
+    auto bad=valid; bad.values_["https://www.tone3000.com/plugin:Program"]={}; CHECK_THROWS(partition(bad));
+    for (const auto &mode : {"stereo","dual"}) CHECK_THROWS(partition(PartitionFixture({},{{"inputMode",StringValue(mode)}})));
+    const auto amp=StageBlock(true,AmpAsset()),cab=StageBlock(false,CabAsset());
+    CHECK_THROWS(partition(PartitionFixture({cab,amp})));
+    CHECK_THROWS(partition(PartitionFixture({amp,cab,cab})));
+    CHECK_THROWS(partition(PartitionFixture({amp,cab},{},{{"stereoEnabled",Variant(2)}})));
+    CHECK_THROWS(partition(PartitionFixture({amp,cab},{},{{"branchAfterBlockId",StringValue("amp-id")}})));
+    CHECK_THROWS(partition(PartitionFixture({amp},{},{},{},{cab})));
+    CHECK_THROWS(partition(PartitionFixture({StageBlock(true,AmpAsset(),{{"enabled",Variant(3)}}),cab})));
+    for (const auto &gear : {"amp-cab","space","experimental","unknown"})
+        CHECK_THROWS(partition(PartitionFixture({StageBlock(true,AmpAsset(),{},gear),cab})));
+    CHECK_THROWS(partition(PartitionFixture({StageBlock(true,AmpAsset("amp_cab")),cab})));
+    CHECK_THROWS(partition(PartitionFixture({amp,StageBlock(false,CabAsset(),{},"space")})));
+    CHECK_THROWS(partition(PartitionFixture({amp,cab},{{"activePresetId",StringValue(std::string(481,'a'))}})));
+    CHECK_THROWS(partition(PartitionFixture({amp,cab},{{"activePresetName",StringValue(std::string(479,'a')+"é")}})));
+    CHECK_NOTHROW(partition(PartitionFixture({StageBlock(true,AmpAsset(" AMP ")),cab})));
+    for (const auto &id : {"osEnabled","spreadEnabled","alignEnabled","chainSoloLeft","chainSoloRight","chainInvertLeft","chainInvertRight"})
+        CHECK_THROWS(partition(PartitionFixture({amp,cab},{},{},{Param(id,1,"PARAM")})));
+    for (const auto &[id,value] : std::map<std::string,double>{{"outputBalance",.6},{"chainPanLeft",.3},{"chainPanRight",.7}})
+        CHECK_THROWS(partition(PartitionFixture({amp,cab},{},{},{Param(id,value,"PARAM")})));
+    auto right=partition(PartitionFixture({amp,cab},{{"inputMode",StringValue("right")}}));
+    CHECK(Tone3000Preset::SummarizeState(right.ampState).inputMode_=="right");
+    CHECK(Tone3000Preset::SummarizeState(right.cabState).inputMode_=="left");
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [DES-SEC] [7.33] */
+TEST_CASE("Offline amp cab partition validates actual active mono short assets", "[gig_rig][gig_rig_codec][tone3000_partition]")
+{
+    auto partition=[](const Bytes &wav){return Tone3000Preset::PartitionAmpCab(PartitionFixture({StageBlock(true,AmpAsset()),StageBlock(false,wav)}),"amp-id","cab-id",true);};
+    for (const auto &[format,bits] : {std::pair(1,16),std::pair(1,24),std::pair(1,32),std::pair(3,32),std::pair(3,64)})
+        CHECK_NOTHROW(partition(CabAsset(format,1,bits,8,48000,false,true)));
+    CHECK_NOTHROW(partition(CabAsset(1,1,16,48000)));
+    CHECK_THROWS(partition(CabAsset(1,1,16,48001)));
+    CHECK_THROWS(partition(CabAsset(1,2)));
+    CHECK_THROWS(partition(CabAsset(1,1,16,8,48000,true)));
+    CHECK_THROWS(partition(CabAsset(3,1,32,8,48000,true)));
+    CHECK_THROWS(partition(CabAsset(1,1,8)));
+    CHECK_THROWS(partition(CabAsset(0xfffe)));
+    CHECK_THROWS(partition({'R','I','F','F'}));
+    auto wav=CabAsset();
+    wav[0]='X'; CHECK_THROWS(partition(wav));
+    wav=CabAsset(); Put32(wav,4,1); CHECK_THROWS(partition(wav));
+    wav=CabAsset(); Put32(wav,16,0xffffffff); CHECK_THROWS(partition(wav));
+    wav=CabAsset(); Put32(wav,28,1); CHECK_THROWS(partition(wav));
+    wav=CabAsset(); wav[32]=4; CHECK_THROWS(partition(wav));
+    wav=CabAsset(); wav.pop_back(); Put32(wav,4,wav.size()-8); CHECK_THROWS(partition(wav));
+    wav=CabAsset(); const Bytes duplicateFmt(wav.begin()+12,wav.begin()+36); Append(wav,duplicateFmt); Put32(wav,4,wav.size()-8); CHECK_THROWS(partition(wav));
+    wav=CabAsset(); Append(wav,{'d','a','t','a',0,0,0,0}); Put32(wav,4,wav.size()-8); CHECK_THROWS(partition(wav));
+    wav=CabAsset(); Bytes reordered{'R','I','F','F',0,0,0,0,'W','A','V','E'};
+    reordered.insert(reordered.end(),wav.begin()+36,wav.end()); reordered.insert(reordered.end(),wav.begin()+12,wav.begin()+36);
+    Put32(reordered,4,reordered.size()-8); CHECK_NOTHROW(partition(reordered));
+    for (const auto value : {std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity()}) {
+        wav=CabAsset(3,1,32); Put32(wav,44,std::bit_cast<uint32_t>(value)); CHECK_THROWS(partition(wav));
+    }
+    wav=CabAsset(3,1,64); Put32(wav,48,0x7ff00000); CHECK_THROWS(partition(wav));
+    wav=CabAsset(3,1,64); const auto enormous=std::bit_cast<uint64_t>(1e300); Put32(wav,44,static_cast<uint32_t>(enormous)); Put32(wav,48,static_cast<uint32_t>(enormous >> 32)); CHECK_THROWS(partition(wav));
+    // The native format reader writes float buffers. A finite double-only
+    // impulse that disappears on conversion is still a silent active IR.
+    wav=CabAsset(3,1,64,8,48000,true); const auto underflow=std::bit_cast<uint64_t>(1e-300);
+    Put32(wav,44,static_cast<uint32_t>(underflow)); Put32(wav,48,static_cast<uint32_t>(underflow >> 32));
+    CHECK_THROWS(partition(wav));
+    for (const auto &asset : {Bytes{},ModelBytes(),Bytes{'{','}'},Bytes{'{','"','w','e','i','g','h','t','s','"',':','[','N','a','N',']','}'}})
+        CHECK_THROWS(Tone3000Preset::PartitionAmpCab(PartitionFixture({StageBlock(true,asset),StageBlock(false,CabAsset())}),"amp-id","cab-id",true));
 }

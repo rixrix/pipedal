@@ -8,18 +8,33 @@
 
 /** Bounded codec utility; callers own private atomic publication/backup.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-EXPORT] [7.11]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-26] [DES-MIX-MATCH] [7.33]
  */
 int main(int argc,char** argv) {
     using namespace pipedal;
     try {
-        if(argc<2)throw std::invalid_argument("Use export ID NAME, build/reset BASENAME SECTION, or edit.");
+        if(argc<2)throw std::invalid_argument("Use export ID NAME, build/reset BASENAME SECTION, edit, or partition AMP_BLOCK_ID CAB_BLOCK_ID --confirm-amp-head.");
         std::string input;char buffer[8192];
         while(std::cin.read(buffer,sizeof(buffer)) || std::cin.gcount()) {
             if(input.size()+std::cin.gcount()>256*1024*1024)throw std::invalid_argument("Codec input exceeds its bound.");
             input.append(buffer,std::cin.gcount());
         }
         const std::string command=argv[1];
-        if(command=="export" && argc==4) {
+        if(command=="partition" && argc==5 && std::string(argv[4])=="--confirm-amp-head") {
+            std::istringstream stream(input);json_reader reader(stream);reader.allowNaN(false);
+            Lv2PluginState state;reader.read(&state);
+            stream >> std::ws;
+            if(!stream.eof())throw std::invalid_argument("Expected exactly one plugin state JSON value.");
+            const auto result=Tone3000Preset::PartitionAmpCab(state,argv[2],argv[3],true);
+            // Validate both stages before serializing, then buffer the complete result.
+            // No validation/encoding failure may publish a partial pair on stdout.
+            std::ostringstream output;json_writer writer(output);
+            writer.start_object();writer.write_member("ampState",result.ampState);output << ',';
+            writer.write_member("cabState",result.cabState);output << ',';
+            writer.write_member("ampBlockId",result.ampBlockId);output << ',';
+            writer.write_member("cabBlockId",result.cabBlockId);writer.end_object();
+            std::cout << output.str();
+        } else if(command=="export" && argc==4) {
             std::istringstream stream(input);json_reader reader(stream);reader.allowNaN(false);Lv2PluginState state;reader.read(&state);
             auto bytes=Tone3000Preset::ExportPreset(state,argv[2],argv[3]);
             std::cout.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());

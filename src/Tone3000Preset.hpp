@@ -97,6 +97,15 @@ namespace pipedal
         size_t namCount = 0, irCount = 0;
     };
 
+    /** Offline experimental states; stored assets are not a readiness verdict.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-26] [DES-MIX-MATCH] [7.33]
+     */
+    struct Tone3000AmpCabPartition
+    {
+        Lv2PluginState ampState, cabState;
+        std::string ampBlockId, cabBlockId;
+    };
+
     /**
      * Pinned v0.0.11 preset conversion without JUCE or program-index imports.
      * All failures throw std::invalid_argument before producing state.
@@ -146,6 +155,14 @@ namespace pipedal
                                                const std::string &rawId, const std::string &name);
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.6] */
         static double OutputLevel(const Lv2PluginState &state);
+
+        /** Pure, strict mono amp-head/cab copy. Explicit source block IDs and
+         * amp-head confirmation are mandatory; combined captures stay intact.
+         * Both complete states validate before return. No live import mapping.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-26] [DES-MIX-MATCH] [DES-SEC] [DES-STATE] [7.33]
+         */
+        static Tone3000AmpCabPartition PartitionAmpCab(const Lv2PluginState &state,
+            const std::string &ampBlockId, const std::string &cabBlockId, bool confirmAmpHead);
 
         /** Validate a sparse edit before producing a replacement full state.
          * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [FR-13] [FR-14] [DES-OPERATE] [DES-STATE] [3.11]

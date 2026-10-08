@@ -977,6 +977,200 @@ namespace
         }
         eq->modified = block.modified = true;
     }
+
+    /** Narrow RIFF/WAVE subset, independent of display metadata or host paths.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [DES-SEC] [7.33]
+     */
+    void CheckMonoCab(std::span<const uint8_t> bytes)
+    {
+        auto u16 = [&](size_t at) -> uint16_t {
+            if (at > bytes.size() || bytes.size() - at < 2) Fail("Truncated cab WAV field");
+            return uint16_t(bytes[at]) | (uint16_t(bytes[at + 1]) << 8);
+        };
+        auto u32 = [&](size_t at) -> uint32_t {
+            if (at > bytes.size() || bytes.size() - at < 4) Fail("Truncated cab WAV field");
+            return uint32_t(bytes[at]) | (uint32_t(bytes[at + 1]) << 8)
+                | (uint32_t(bytes[at + 2]) << 16) | (uint32_t(bytes[at + 3]) << 24);
+        };
+        if (bytes.size() < 12 || std::memcmp(bytes.data(), "RIFF", 4)
+            || std::memcmp(bytes.data() + 8, "WAVE", 4) || uint64_t(u32(4)) + 8 != bytes.size())
+            Fail("Cab requires a complete RIFF/WAVE asset (RF64 is unsupported)");
+        size_t fmt = 0, data = 0, dataSize = 0;
+        for (size_t at = 12; at < bytes.size();)
+        {
+            if (bytes.size() - at < 8) Fail("Truncated cab WAV chunk");
+            const size_t size = u32(at + 4), begin = at + 8;
+            if (size > bytes.size() - begin || (size & 1) > bytes.size() - begin - size)
+                Fail("Cab WAV chunk exceeds asset");
+            if (!std::memcmp(bytes.data() + at, "fmt ", 4)) {
+                if (fmt || (size != 16 && size != 18)) Fail("Duplicate or unsupported cab WAV format");
+                fmt = begin;
+                if (size == 18 && u16(begin + 16) != 0) Fail("Unsupported cab WAV format extension");
+            }
+            if (!std::memcmp(bytes.data() + at, "data", 4)) {
+                if (data) Fail("Duplicate cab WAV data");
+                data = begin; dataSize = size;
+            }
+            at = begin + size + (size & 1);
+        }
+        if (!fmt || !data || !dataSize) Fail("Cab WAV needs nonempty format and audio data");
+        const auto format = u16(fmt), channels = u16(fmt + 2), bits = u16(fmt + 14);
+        const uint32_t rate = u32(fmt + 4), byteRate = u32(fmt + 8), align = u16(fmt + 12);
+        const bool pcm = format == 1 && (bits == 16 || bits == 24 || bits == 32);
+        const bool floating = format == 3 && (bits == 32 || bits == 64);
+        if ((!pcm && !floating) || channels != 1 || rate < 8000 || rate > 192000
+            || align != bits / 8 || uint64_t(rate) * align != byteRate || dataSize % align
+            || dataSize / align > rate)
+            Fail("Cab requires a short (at most one second) mono PCM/float WAV");
+        bool nonzero = false;
+        for (size_t at = data; at < data + dataSize; at += align)
+        {
+            if (floating) {
+                double sample;
+                if (bits == 32) sample = std::bit_cast<float>(u32(at));
+                else {
+                    const uint64_t value = uint64_t(u32(at)) | (uint64_t(u32(at + 4)) << 32);
+                    sample = std::bit_cast<double>(value);
+                }
+                if (!Finite(sample) || std::abs(sample) > std::numeric_limits<float>::max())
+                    Fail("Cab WAV contains nonfinite or unrepresentable samples");
+                nonzero = nonzero || static_cast<float>(sample) != 0;
+            } else for (size_t byte = 0; byte < align; ++byte) nonzero = nonzero || bytes[at + byte] != 0;
+        }
+        if (!nonzero) Fail("Cab WAV is silent");
+    }
+
+    std::span<const uint8_t> ActiveAsset(const Tree &block)
+    {
+        const auto id = Integer(block.Find("activeModelId"));
+        for (const auto &model : block.Child("ModelCache")->children)
+            if (Integer(model.Find("modelId")) == id) return model.Find("data")->binary;
+        Fail("Active TONE3000 model asset is missing");
+    }
+
+    // Structural file validation is not a NAM engine load/readiness verdict.
+    void CheckAmpAsset(std::span<const uint8_t> bytes)
+    {
+        const std::string text(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        ToneMetadata(text);
+        const auto parsed = json_variant::parse(text);
+        const auto &object = *parsed.as_object();
+        for (const auto *field : {"version", "architecture"})
+            if (!object.contains(field) || !object.at(field).is_string() || object.at(field).as_string().empty())
+                Fail("Amp NAM is missing its version or architecture");
+        if (!object.contains("config") || !object.at("config").is_object()
+            || !object.contains("weights") || !object.at("weights").is_array())
+            Fail("Amp NAM has invalid config or weights");
+        for (const auto &weight : *object.at("weights").as_array())
+            if (!weight.is_number() || !Finite(weight.as_number())
+                || std::abs(weight.as_number()) > std::numeric_limits<float>::max())
+                Fail("Amp NAM contains invalid weights");
+        if (object.contains("metadata") && object.at("metadata").is_object()) {
+            const auto &metadata = *object.at("metadata").as_object();
+            auto gear = MetadataString(metadata, "gear_type");
+            const auto begin = gear.find_first_not_of(' '), end = gear.find_last_not_of(' ');
+            gear = begin == std::string::npos ? std::string() : gear.substr(begin, end - begin + 1);
+            for (auto &c : gear) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            // An explicit conflicting capture classification always wins over
+            // a catalog label and the caller's amp-head confirmation.
+            if (!gear.empty() && gear != "amp" && gear != "preamp" && gear != "pedal_amp")
+                Fail("NAM metadata does not describe an amp-head capture");
+        }
+    }
+
+    Lv2PluginState EncodeStateTree(const Tree &tree)
+    {
+        Writer out;
+        out.Raw(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>("T3KB"), 4));
+        out.Node(tree);
+        StateTree(out.bytes); // validate the complete derived state before publication
+        Lv2PluginState result; result.isValid_ = true;
+        auto &entry = result.values_[Tone3000Preset::STATE_URI];
+        entry.atomType_ = ATOM_STRING; entry.flags_ = 3; entry.value_ = Encode(out.bytes);
+        return result;
+    }
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-26] [DES-MIX-MATCH] [DES-STATE] [7.33] */
+Tone3000AmpCabPartition Tone3000Preset::PartitionAmpCab(const Lv2PluginState &state,
+    const std::string &ampBlockId, const std::string &cabBlockId, bool confirmAmpHead)
+{
+    if (!confirmAmpHead) Fail("Explicit amp-head capture confirmation is required");
+    Identity(ampBlockId, 512); Identity(cabBlockId, 512);
+    const auto bytes = Decode(state);
+    const auto source = StateTree(bytes);
+    const auto summary = Summarize(source);
+    const auto parameters = ParameterValues(*source.Child("PARAMETERS"), "PARAM");
+    auto parameter = [&](const char *id) { return ParameterOrDefault(parameters, id); };
+    if (summary.stereoEnabled_ || !summary.branchAfterBlockId_.empty()
+        || (summary.inputMode_ != "left" && summary.inputMode_ != "right"))
+        Fail("Partition requires explicit mono input and unbranched serial routing");
+    if (parameter("osEnabled") || parameter("spreadEnabled") || parameter("alignEnabled")
+        || parameter("chainSoloLeft") || parameter("chainSoloRight")
+        || parameter("chainInvertLeft") || parameter("chainInvertRight")
+        || parameter("outputBalance") != .5 || parameter("chainPanLeft") != 0 || parameter("chainPanRight") != 1)
+        Fail("Disable source oversampling/spatial/image processing before partitioning");
+    const auto &snapshot = *source.Child("ChainSnapshot");
+    const Tree *amp = nullptr, *cab = nullptr;
+    for (const auto *lane : {snapshot.Child("ChainBlocks"), snapshot.Child("RightChainBlocks", false)}) {
+        if (!lane) continue;
+        for (const auto &block : lane->children) {
+            const auto type = Text(block, "type");
+            if (type == "insert") continue;
+            if (lane->tag != "ChainBlocks" || !Boolean(block, "enabled", true))
+                Fail("Partition requires enabled blocks on the left serial lane only");
+            if (type == "nam" && !amp && !cab && Text(block, "id") == ampBlockId) amp = &block;
+            else if (type == "ir" && amp && !cab && Text(block, "id") == cabBlockId) cab = &block;
+            else Fail("Choose exactly one NAM amp followed by one cab IR; combined captures stay intact");
+        }
+    }
+    if (!amp || !cab) Fail("Requested amp/cab blocks are missing");
+    const auto ampMetadata = json_variant::parse(Text(*amp, "toneJson"));
+    const auto cabMetadata = json_variant::parse(Text(*cab, "toneJson"));
+    if (MetadataString(*ampMetadata.as_object(), "gear") != "amp"
+        || MetadataString(*cabMetadata.as_object(), "gear") != "cab")
+        Fail("Only explicitly classified amp-head and cab captures can be partitioned");
+    CheckAmpAsset(ActiveAsset(*amp)); CheckMonoCab(ActiveAsset(*cab));
+    const auto sourceId = Text(source, "activePresetId");
+    if (sourceId.size() > 480) Fail("Source identity is too long for derived stage identities");
+    const auto sourceName = Text(source, "activePresetName");
+    if (sourceName.size() > 480) Fail("Source name is too long for derived stage names");
+    auto makeStage = [&](const Tree &block, bool ampStage) {
+        Tree tree = source;
+        const auto id = (sourceId.empty() ? std::string("pipedal-derived") : sourceId)
+            + (ampStage ? ":pipedal-amp" : ":pipedal-cab");
+        tree.Set("activePresetId", TextValue(id));
+        tree.Set("activePresetName", TextValue(sourceName
+            + (ampStage ? " (Amp stage)" : " (Cab stage)")));
+        tree.Set("inputMode", TextValue(ampStage ? summary.inputMode_ : "left"));
+        auto *chain = tree.Child("ChainSnapshot");
+        chain->Set("stereoEnabled", BoolValue(false));
+        chain->Set("branchSide", TextValue("left")); chain->Set("branchAfterBlockId", TextValue(""));
+        Tree lane; lane.tag = "ChainBlocks"; lane.modified = true; lane.children.push_back(block);
+        Tree right; right.tag = "RightChainBlocks"; right.modified = true;
+        chain->children = {std::move(lane), std::move(right)};
+        tree.children.erase(std::remove_if(tree.children.begin(), tree.children.end(),
+            [](const Tree &child) { return child.tag == "MidiMappings"; }), tree.children.end());
+        Tree midi; midi.tag = "MidiMappings"; midi.modified = true; tree.children.push_back(std::move(midi));
+        // Explicitly seed every pinned parameter: no duplicated gate/pitch/tone
+        // or image processing, and no implicit host constructor defaults.
+        for (const auto &definition : PARAMETERS) {
+            const std::string_view name = definition.id;
+            const bool keepInput = name == "inputLevel" || name.starts_with("gate") || name.starts_with("pitch")
+                || name == "calibrateInput" || name == "inputCalibrationLevel" || name == "targetLoudness";
+            const bool keepOutput = name.starts_with("tone") || name == "outputLevel";
+            double value = (ampStage ? keepInput : keepOutput) ? parameter(definition.id) : definition.initial;
+            if (name == "osEnabled" || name == "osFactor" || name == "spreadEnabled" || name == "alignEnabled"
+                || (!ampStage && (name == "gateEnabled" || name == "pitchEnabled" || name == "calibrateInput"))
+                || (ampStage && name == "toneEqEnabled")) value = 0;
+            SetParameter(tree, definition.id, value);
+        }
+        return EncodeStateTree(tree);
+    };
+    Tone3000AmpCabPartition result;
+    result.ampBlockId = ampBlockId; result.cabBlockId = cabBlockId;
+    result.ampState = makeStage(*amp, true); result.cabState = makeStage(*cab, false);
+    return result;
 }
 
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.8] */
