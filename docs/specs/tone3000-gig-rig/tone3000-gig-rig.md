@@ -3,9 +3,9 @@ afx: true
 type: SPRINT
 status: Approved
 owner: "@rixrix"
-version: "2.15"
+version: "2.16"
 created_at: "2026-10-03T23:59:54.000Z"
-updated_at: "2026-10-08T03:45:44.000Z"
+updated_at: "2026-10-08T04:11:18.000Z"
 tags: ["tone3000-gig-rig", "sprint", "raspberry-pi", "lv2"]
 approval:
   spec: Approved
@@ -1469,6 +1469,26 @@ Live experimental Save/recall/physical switching, sensible-buffer performance, r
 
 **Checkpoints and remaining work:** commits `b8fd96a` (Pitch), `3e90471` (authoring), `e7bcc77` (UI), `6dbb379` (touch ownership), `8412cf7` (atomic Load), `97184c0` (upload flush), `a4bf306` (real graphs/MIDI/state diagnostics), `bfc46f4` (controlled DSP timeline), `8b4cd7a` (LV2 install path). [7.35]/[7.36] Agent implementation/checks complete; Human gates remain open. [7.34]/[7.37] remain incomplete pending the experimental live-device/rollback/performance gates above. Ordinary full-rig use stays available; experiment creation is opt-in and its receipt remains `qualified:false`.
 
+#### Library discovery correction — 2026-10-08T03:58:05.000Z
+
+Rix cannot find Mix & Match and sees Rx sources marked not saved. Read-only actual native Library audit finds eight saved Rx imports: four under their original factory names, three under user-source names and Stereo Crunch Verb under its factory name. Exported `(...PiPedal)` source files have separate identities/hashes and no linked imports. Saved Rx rigs have not disappeared; names alone must not manufacture a source/Update relationship. The current served frontend is the intended candidate, and Mix & Match is hidden beneath mapped saved-copy rows. This is a presentation/discoverability defect.
+
+Refine [7.30]/[7.36] under the existing approved UI scope: a prominent Library Mix & Match action switches to Saved; Saved renders actual linked PiPedal copies by preset name/bank with original source caption and current-first ordering. Search filters individual saved rows, preserving exact source/target identity references; never link similarly named exports or modify provenance. Unmapped source label becomes "Available to add" with source-versus-saved explanation. Keep Preview/Update/Load/native guards unchanged, create a separate copy only through the existing confirmed dialog, and do not add duplicate Rx presets or change audio/current edits. Actual production component tests, build and narrow visual checks are required for completion; static publication uses the existing guarded rollback publisher. No native API/source-link mutation is needed. Spec/Design/Tasks remain Approved under existing delegated authorization.
+
+#### Compact T3K actions — 2026-10-08T04:05:45.000Z
+
+Rix requests consistent, space-efficient buttons in Blocks and Library. Refine the approved [DES-VISUAL-ALIGN]/[DES-PLAIN-TOOLS] presentation scope ([7.16]/[7.25]/[7.26]/[7.36]): use one scoped stylesheet for custom T3K panel/dialog actions, 44px minimum touch targets, 4px corners, 14px sentence-case text, modest padding and no contained-button elevation. Preserve focus-visible feedback and disabled contrast through the existing theme. Use four equal-width Library filters that fit narrow screens; action rows wrap with gaps rather than Stack margins. Shorten Apply/Save and Preview/Compare/Add copy labels, retaining explicit accessible names and unchanged ownership/dirty/source/review guards. Upload remains clearly identified. Ordinary PiPedal controls and toolbar styling stay under the existing theme. Check rendered desktop, 344px and 414px layouts without loading, saving or modifying owner rigs. Approved under the existing delegated UI scope.
+
+#### Library discovery and compact-action verification — 2026-10-08T04:11:18.000Z
+
+Completed source checkpoints: `1d193a5` fixes saved-copy discovery/Mix & Match; `eed8fc4` scopes uniform buttons, equal-width filters and shorter visible labels. Existing production-component tests resolve semantic accessible names, preserving actual Apply/Save/Preview/Upload handler and ownership assertions. All150 frontend tests pass with no skips; TypeScript/Vite production build passes. Final assets: `main-DLssXpzE.js` SHA256=`2f7d037f90c4103c5dc7c9e9390e8fb1dd22dfa855cafa80d1a98acf9991e8b6`; `main-CXSODtSq.css` SHA256=`6752b59be6db7b91ec3a5a8f602d4d23c6e9b79c8db159181ecc70e64bcb5aec`.
+
+Actual native-browser review used an isolated Edge window against the serving Pi. Desktop Apply/Save are compact, uniform-height and retain disabled guards. At344px, an initial long Upload label wrapped Mix & Match; shortening it to Upload and moving file/operation guidance into More tools made all three actions and all four filters fit one row. Final344px Blocks/Library and414px Saved/exported-source/expanded-help rendering pass. Top Mix & Match switches to Saved; searching Rx displays all eight actual saved names; a row opens the existing saved-source experimental dialog without creating/loading. Exported `(PiPedal)` files show Available to add. Visual navigation performed no owner preset/rig writes; the isolated review window and its DevTools were closed, leaving the original owner window intact.
+
+Guarded static publishers verify all incoming hashes and publish the entry index last, retaining previous assets and private rollback archives; final receipt reports `index_published:true`, `published_files_verified:true`, `observed_changed_fields:[]`. Private Pi evidence: `/home/nam/.local/state/pipedal-gig-rig/library-discovery-20261008T0400/publication/`, `/home/nam/.local/state/pipedal-gig-rig/button-polish-20261008T0410/publication/`, final `/home/nam/.local/state/pipedal-gig-rig/button-polish-final-20261008T0415/publication/`. First Library staging path was rejected before publication because it lacked the required vite/dist layout; corrected staging succeeded. Actual Library audit supports linked saved IDs, not a full raw bank archive: the read-only bank download returned IncompleteRead and was not used as comparison evidence. No daemon/audio/native-plugin replacement or owner settings restore in this UI correction. Final read-only check confirms pipedald active and unchanged SHA256=`f97320aed2b98a69fe3370fd75ff55cb9f01c2c18add9b1cbb8193eb9d635343`.
+
+[7.16]/[7.25]/[7.26]/[7.30]/[7.36] bounded Agent follow-up complete; physical phone/listening acceptance stays unchecked. Browser inspection surfaced an aria-hidden/focus warning on modal opening; screen-reader/modal focus behavior remains a follow-up, not qualified by this visual pass. Existing [7.34]/[7.37] experimental audio/recall/rollback/performance and disposable-bank cleanup gates remain open. No release or Git push.
+
 <!-- SPRINT-SECTION-END: DESIGN -->
 
 ---
@@ -2241,5 +2261,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 | 2026-10-08T03:37:08.000Z | [7.35], [7.36] | Implemented / Agent verified | Independent Pitch and guarded saved-copy frontend; source/checkpoints, actual checks and limits consolidated in [DES-PITCH-LV2]. | [x] | [ ] |
 | 2026-10-08T03:37:08.000Z | [7.34], [7.37] | Implemented / Partially verified | Native authoring, actual graph and package evidence in [DES-PITCH-LV2]; final native replacement/live-device/rollback/performance gates pending concurrent-use clarification. | [ ] | [ ] |
 | 2026-10-08T03:45:44.000Z | [7.34], [7.37] | Final native replacement / Guarded checks | Fresh owner preservation, final-service refusal/HTTP and original audio-runtime checks pass; exact evidence and remaining experimental qualification in [DES-PITCH-LV2]. | [ ] | [ ] |
+
+| 2026-10-08T04:11:18.000Z | [7.16], [7.25], [7.26], [7.30], [7.36] | Library discovery / Compact actions / Agent verified and deployed | Actual linked Rx names, prominent Mix & Match, scoped compact actions and equal-width filters;150 frontend tests/build and serving desktop/344px/414px checks pass. Exact artifacts/rollback and remaining boundaries in [DES-PITCH-LV2]. | [x] | [ ] |
 
 <!-- SPRINT-SECTION-END: SESSIONS -->
