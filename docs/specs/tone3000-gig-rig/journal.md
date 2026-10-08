@@ -3,7 +3,7 @@ afx: true
 type: JOURNAL
 owner: "@rixrix"
 created_at: "2026-10-03T23:59:54.000Z"
-updated_at: "2026-10-07T10:17:25.000Z"
+updated_at: "2026-10-07T13:42:55.000Z"
 tags: ["tone3000-gig-rig", "journal"]
 ---
 
@@ -175,6 +175,16 @@ Append-only continuity for [the sprint](tone3000-gig-rig.md). Original blueprint
   **Impact**: sprint v1.9, [DES-RECOVERY]/[3.16]. Local Agent implementation and checks complete; technical findings, exact evidence and remaining qualification are recorded entirely in sprint Design. Existing index/staged baseline preserved.
   **Action**: locally verified → retain unstaged changes for review. Pi remains off; no deployment or import performed. Linux/device, native-MIDI ownership and Human/gig gates remain open. Spec/Design/Tasks remain Approved under explicit authorization and existing delegation.
 
+- **2026-10-07T10:42:34.000Z** — [AUTO:afx-sprint] Rix approves all Stage Tools proposals, a patch branch and two existing-work commits, then requests implementation.
+  `[scope-approval, stage-tools, patch-history, implementation, auto-capture]`
+  **Impact**: sprint v2.0, [FR-16]–[FR-24], [DES-STAGE], [7.1]–[7.10]. Spec → Design → Tasks reviewed/reapproved under explicit authorization and delegated approval. Research direction and technical rollout stay in sprint Design.
+  **Action**: approved → implement first local preview/status/units slice; advanced audio phases and actual-device gates remain explicit. Prior unstaged constraint is superseded only for the two requested commits; future feature edits remain unstaged. No remote push or device update.
+
+- **2026-10-07T11:03:37.000Z** — [AUTO:afx-task] Created the requested patch checkpoints and locally verified the first Stage Tools slice.
+  `[patch-history, preview, live-status, native-units, local-verification, auto-capture]`
+  **Impact**: [DES-STAGE], [7.1], [7.2], [7.3] units and [7.10] history. Technical source paths, gate results and limits are recorded in sprint Design; work-session Agent verification is separate from Human acceptance.
+  **Action**: locally verified → keep feature changes unstaged. Actual Linux/server/browser/device gates and remaining advanced phases stay open. No remote push or Pi update.
+
 ## Discussions
 
 
@@ -208,3 +218,101 @@ Owner’s stock chain appearance is implemented and published with no enclosing 
 ### 2026-10-05T08:16:57.000Z — Final inline browser E2E and guarded restore passed
 
 Actual cab form edit→Apply→normal Save→export/recall passed on a fresh disposable copy, with exact raw assets and surrounding effects retained. Actual Stereo Fuzz branches, right-block navigation, normal Delay selection and narrow desktop checks passed. Both guarded restores recovered clean owner preset 2; all three disposable IDs are absent. [3.14]/[3.15] Agent gates complete; human phone/listening/performance gates remain pending. Exact evidence and the observed accumulated xrun-count change are in [DES-OPERATE]; no seamless/zero-xrun claim is inferred.
+
+### 2026-10-07T12:13:52.000Z — Authorized continuation, live hardware and A2 draft diagnosis
+
+Rix authorizes remaining Stage Tools except [7.8], deployment and same-device T3K copies; routine spec/design/task refinements are reviewed/reapproved in that order under delegated approval. Design v2.1 now pins the bank/bundle/recovery/native bridge/meter/export contracts. Private pre-change backup stays on Pi; no Rx/source baseline mutation or new runtime installation yet. Two agents implemented recovery, performance-bank and bundle paths; native bridge/frontend gates and Linux compilation continue. Native export codec passes 1,513 assertions / 20 cases under ASan/UBSan, preserving exact snapshot/cache bytes and excluding seven session preferences. No measured owner balance has been fabricated or applied.
+
+After owner reboot/reconnects, Linux initially detects only SINCO and PiPedal uses null fallback. Changing the Jogg connection and removing its separate power supply is followed by observed USB enumeration 84ef:0014 / hw:Audio; causation is not established. Requested daemon restarts recover real Jogg capture/playback at 48 kHz / 16×6. After a further port move fallback recurs; another requested restart restores RUNNING PCM streams under PID2272. SINCO MIDI connects to PiPedal. Owner confirms browser Running. The new recovery implementation remains uninstalled/unqualified on real delayed USB; this observation uses the installed older runtime.
+
+Owner reports selecting Full in block settings then only Save preset. Read-only saved Rx requests: IDs26/24/15 all Full×2, ID17 Full×3; ID25 Lite×3 and ID23 Full+Lite. Current ID25 reports Lite×3/followDefaults false. Owner confirms not pressing Apply block changes. Explained the current Apply→Save sequence and added a pending-draft UI message; do not misdiagnose persistence failure from this workflow. Native effective A2 remains unknown absent actual engine evidence. These owner edits supersede older Rx backup values; reread and back up current state immediately before any later deployment/export/reset.
+
+### 2026-10-07T12:58:09.000Z — Remaining Stage paths coded; qualification continues
+
+Combined frontend passes 64 tests and production build; selected real-Linux codec/Stage/performance/bundle/recovery tests pass 2,832 assertions in 41 cases, with separate overlapping library/defaults checks. Native bridge audit reproduced and corrected terminal cancellation, shutdown retained lifetime and first-block measurement revision races; actual-method ASan/UBSan and pinned overlay tests pass. All source remains unstaged. Full ARM64 T3K build and actual wrapper/service/browser gates are still running/pending; no installed candidate, source reset or owner output trim is claimed.
+
+Same-device export/reset helper is private, fully prevalidated, digest guarded, uses exclusive user-file publication and checks stopped owner dirty/selection state. Native loader verification reads full preset bodies through disposable migrate copies. Transaction rollback after directory sync failure and changed-file preservation pass ten tests. Fresh state/active-bundle backup and final owner-state checks remain prerequisites to publication. Technical results, pins and exact boundaries are retained in the sprint Design section. Owner's latest saved bank still retains Rx IDs26/25/24/15/17/23 in order; those values supersede the initial archive.
+
+### 2026-10-07T13:26:52.000Z — Stage candidate deployed; owner phrase and rehearsal gates remain
+
+Final pinned ARM64 candidate and rebuilt bridge pass244 DSP tests plus actual headless runtime/readback/Stage, selected native host and network-isolated saved-state diagnostics. Deployed only service runtime/frontend after a fresh same-Pi private backup. Guarded six native Rx copies and nine mapped baseline resets published; whole Rx boards/trims and other bank files verified unchanged. Native copies now discoverable with no warnings after correcting the inherited ACL mask; twelve filesystem fault/transaction tests pass. Service E2E covers preview/four copies/bundle checks/upload/no-autoload/native edits/Save/recall/cancel/Align; silent measurement refuses trim application. No owner signal balance or lead gain is fabricated. Technical details and exact artifacts remain in sprint Design.
+
+Exact Jogg absent-at-start fallback then automatic recovery and device-present restart pass without Settings Apply. Requested48kHz/16×6 retained; hardware period48 frames/buffer288 recorded separately. Short181-second observation has two additional underruns, so no sustained/gig verdict. Owner later selects Rx24; guarded restoration preserves that newer selection. Browser tool unavailable; phone, physical MIDI, valid played-phrase comparison, listening, cold boot, live rollback and rehearsal remain open. Apply block changes must precede normal Save for A2 draft changes. [7.8] untouched, approvals remain Approved, all new source unstaged and no remote push.
+
+### 2026-10-07T13:30:00.000Z — Final health and preservation check
+
+Final HTTP serves the expected production entry; Jogg engine running without fallback. Owner subsequently selects clean Rx17 and this newer context remains intact. Disposable validation banks removed. Python helpers compile, diff whitespace check passes and Git index remains empty. Human soundcheck/rehearsal gates stay open.
+
+### 2026-10-07T13:35:03.000Z — Mobile numeric entry added as task7.12
+
+Owner reports that tapping the knob value in the Android app opens no keyboard and touch knob adjustment is awkward. Sprintv2.2 Spec/Design/Tasks reviewed/reapproved in order under that explicit request and standing delegated approval. The new bounded shared-input task targets actual tap routing, stable focus/drafts, signed/decimal validation and touch size, with frontend-only rollout. Exact technical contract is in Design; physical Android acceptance remains separate.
+
+### 2026-10-07T13:42:55.000Z — Mobile input task implemented and deployed
+
+Shared knob value routes touch to the native input and preserves focused drafts across readbacks. Done commits once; signed/decimal entry, finite/range handling and stale preset/snapshot/context guards covered. Review caught valid→invalid stock entry retaining its live DSP preview; corrected with preview restoration and a regression before final rollout. Nine new checks bring full frontend suite to73 passing tests; production build and final static deployment pass with observed audio/selection/settings unchanged. Exact paths/results are in Design. Actual Android keyboard/rotation acceptance remains Human pending. Source unstaged, approvals remain Approved, no daemon/plugin changes.
+
+### 2026-10-07T13:51:02.000Z — Native labels, gear and Fold continuation
+
+Owner requests native category coverage, phone usability and gapless feasibility. Sprint v2.3 records [7.13]–[7.15], reviewed/reapproved Spec→Design→Tasks under standing delegated approval. Native sources confirm seven categories and legacy alias; existing Split offers a preloaded 100ms crossfade, while whole-preset T3K model changes mute/reload. Scope preserves owner boards/PC mapping and source remains unstaged. Phone/listening/headroom gates remain open.
+
+### 2026-10-07T14:03:20.000Z — Gear/Fold UI deployed; gapless boundary verified
+
+Tasks[7.13]/[7.14] Agent implementation verified/deployed with86 frontend tests, TypeScript/Vite build, matching HTTP asset/hash and observed owner/audio state unchanged. New production regressions cover signed local drafts, real gain conversion, explicit authoritative replacement and Soundcheck mount/disconnect. Source and public native SVG license retained; code remains unstaged. Private frontend rollback: `/home/nam/.local/state/pipedal-gig-rig/fold-gear-20261007T1400Z/`. Actual Fold cover/unfolded/rotation/IME checks remain Human.
+
+Task[7.15] read-only audit proves existing100ms Split A/B selector transition with both rigs enabled/continuously processing; whole-preset T3K opaque-state reload is not gapless. Held-fade readiness is not exposed and a single-instance point CPU observation does not qualify a dual pair. Bounded copied-board/CC/CPU/xrun/listening procedure is in Design. No active board/controller/quality settings changed, no false Ready badge and no new audio-engine rollout. Phrase recording[7.8] remains deferred.
+
+### 2026-10-07T14:07:22.000Z — Final touch-target and path verification
+
+Final44px numeric/select/switch areas verified in source;86 tests and production build pass. Final static entry `main-Bbv4oPyC.js`, SHA256 `86e807f9d1e10de4d62afa3c2d92ba4167214e6b956d919b3d5ad0eca37b2f67`, served bytes match candidate. Private backup `/home/nam/.local/state/pipedal-gig-rig/fold-gear-final-20261007T1405Z/`; state guard unchanged and audio active/nonrestarting. Entry-to-draft/explicit Apply, display-only focus and native Soundcheck paths reviewed. Sprint Spec/Design/Tasks remain Approved; Human Fold/listening/headroom gates remain unchecked; index empty.
+
+### 2026-10-07T21:02:37.000Z — [7.15] deferred; [7.16] rendered UI alignment
+
+Owner deferred gapless to documentation only. Retained audit and future qualification procedure in the sprint Design; no gapless implementation/configuration. Reviewed/reapproved focused presentation Design/Tasks under standing delegated authorization. Native Edge checks of served Pi UI at 344/690/1093 widths reproduced label truncation, uneven dropdowns, blank default gear paint, five-plus-one block wrapping and footer overlap. Corrected T3K-only presentation and responsive form grids; physical Android IME acceptance remains open and stock host-toolbar clipping at344 remains recorded. All86 frontend tests and build pass, default-paint regression fails on pre-fix code. Final static asset/hash, private rollback, unchanged protected-state and active daemon checks are in [DES-VISUAL-ALIGN]. No owner preset/audio changes, restart, native bundle update, staging or commit. Live high CPU/increasing cumulative xruns are documented as unresolved performance evidence.
+
+### 2026-10-07T21:12:40.000Z — [7.17] owner-linked coloured TONE3000 logo
+
+Owner clarified logo and supplied the GitHub avatar URL. Updated the focused Design/Task under standing delegated authorization to bundle the exact coloured image offline inside PiPedal's stock chain frame. Production display-only rendering and parent navigation verified, all86 frontend checks and build pass. Actual served Pi screenshot, matching asset hashes, private rollback and unchanged protected-state evidence are in [DES-T3K-LOGO]. Daemon active/nonrestarting; owner Rx Marshall Bluesbreaker preserved. Physical Android acceptance remains open. Source unstaged; no DSP/native bundle, audio configuration, Save/Apply, commit or remote Git push.
+
+### 2026-10-07T21:22:20.000Z — [7.18] current-rig, global and comparison scope clarified
+
+Owner asks whether Soundcheck is global. Source audit confirms mixed scope: current-instance tools, browser-session comparisons across rigs, explicit trim persisted to one exact saved target. Updated existing UI headings/help rather than changing behavior; clarified shared device profiles/system settings, per-rig calibration/oversampling and source library scope. Scope and verification live in [DES-CONTROL-SCOPE]. All86 frontend tests/build pass; guarded static publish preserves owner state and active/nonrestarting daemon. Actual desktop and344px served UI screenshots checked; physical Android acceptance remains pending. Changes unstaged; no owner measurement/Save/Apply/audio changes, daemon restart, commit or Git push.
+
+### 2026-10-07T21:23:34.000Z — Library upper-toolbar placement investigated
+
+Owner asks to investigate moving Library beside the upper host action icons. Source confirms feasible ownership move from Tone3000Panel to MainPage, with shared library/guards preserved and narrow-screen toolbar clipping requiring responsive treatment. Proposal and exact source/placement/locked-chain constraints recorded in [DES-CONTROL-SCOPE]. Investigation only: no implementation, deployment, preset/audio changes or staging.
+
+### 2026-10-07T21:30:39.000Z — [7.19] Library moved to upper toolbar
+
+Owner activates the placement proposal. Focused Design/Tasks reviewed/reapproved under delegated authorization. MainPage now owns the sole T3K Library trigger/dialog, with desktop label and44px narrow icon, retained locked-chain access, bounded scrollable host actions and more lower tab space. Existing library operation guards unchanged. Paths, all86 frontend tests/build, desktop/344px actual served open/discover/close checks, artifact hash, rollback and preserved owner/audio evidence are in [DES-LIBRARY-TOOLBAR]. Physical Fold4 touch/scroll and shared modal screen-reader behavior remain unqualified. Source unstaged; no owner preset/audio/native bundle changes, restart, commit or Git push.
+
+### 2026-10-07T21:45:37.000Z — Pre-rehearsal review and bounded fixes authorized
+
+Owner asks to save Performance View as possible next work, reassess current patch/upstream and prioritize stability/UI, then authorizes bounded fixes/enhancements before testing in about eight hours. Focused Design→Tasks reviewed/reapproved under explicit instruction and standing delegated approval; [DES-STABILITY-REVIEW]/[7.20]–[7.22] retain scope and verification boundaries. Performance View qualification stays deferred; no snapshot compatibility or seamless-switching claim. Refreshed latest T3K/main remains v0.0.12, PiPedal main/stable unchanged, all43 numeric IDs covered. Two standing authorized agents audit native and UI independently. Working-source hashes and empty index preserved privately; Pi daemon active, NRestarts0. Durable dialog dismissal defect identified; additional native lifecycle findings require reproduction before changes. Owner rigs/audio/measurements untouched.
+
+### 2026-10-07T22:38:42.000Z — [7.21]–[7.24] Pre-rehearsal review completed and qualified candidate deployed
+
+AFX sprint Design/Tasks remain Approved under the owner’s delegated authorization. Upstream/control coverage, confirmed lifecycle/dialog defects, native failed-then-corrected device cases, UI corrections and exact final artifacts/checks are consolidated in [DES-STABILITY-REVIEW]. Agent gates complete: frontend97, tooling113 with no skips, native49 focused cases plus installed-wrapper6, actual-method14, actual service timed/direct-Patch recall, separate dirty-state restart and bundle import. Owner six Rx saved rigs/order/trims, defaults, audio and controller settings remain preserved; all disposable banks cleaned and bank6/preset26 clean restored. Bounded five-minute observation has zero new xruns/restarts/throttling but a97.46% CPU-meter peak, so actual playing/rehearsal remains required. Narrow pre250ms restart race is not device-qualified; physical Fold4/keyboard/focus/MIDI/phrase measurements remain Human gates. Performance View authoring [7.20], gapless [7.15] and phrase recording [7.8] stay deferred. Source unstaged, no commit/Git push, private evidence and current rollback archives remain on Pi.
+
+### 2026-10-07T23:00:31.000Z — Plain-language phone tools refinement
+
+Owner asks for simpler Soundcheck instructions, an explanation of Plugin input mode and clearer Library labels/layout on Fold4. Presentation-only design [DES-PLAIN-TOOLS] and task [7.25] approved under existing delegated authorization. Preserve handlers, saved rigs, hardware/audio/MIDI settings and unstaged work; physical phone acceptance remains pending.
+
+### 2026-10-07T23:11:27.000Z — Plain-language tools deployed
+
+[7.25] Agent complete: Soundcheck starts with preset volume matching and separates left/right tools; TONE3000 input has source-verified per-mode help; Library statuses/actions and renamed saved-copy search fit narrow portrait. 98 frontend tests/build and actual served desktop/344px/412px rendering pass. Guarded static publish preserves actual Rx Stereo Crunch Verb unsaved state and audio/controller settings. Exact evidence/remaining physical Fold4 and audio qualification limits stay in [DES-PLAIN-TOOLS]. Source unstaged.
+
+### 2026-10-07T23:13:16.000Z — Discoverable editing actions
+
+Owner points out bottom-only Apply block changes is easy to miss. Approved bounded [DES-VISIBLE-APPLY]/[7.26] under standing authorization: sticky top action and pending guidance, consistent current-rig Settings action, explicit Apply then Save, preserved guards and owner state.
+
+### 2026-10-07T23:19:30.000Z — [7.26] Apply discoverability deployed and visually verified
+
+Single guarded Apply strip remains visible while scrolling Blocks/current-rig Settings, with pending guidance and explicit Apply then PiPedal Save. Actual chain focus exposed an obscured heading; corrected using rendered strip height and visually rechecked at344px. Local draft/Refresh check preserved owner's unsaved Rx Stereo Crunch Verb. All98 frontend tests/build pass; final artifact, private rollback, guarded state and active/nonrestarting daemon evidence in [DES-VISIBLE-APPLY]. Agent gate complete, physical Fold4 acceptance pending; no audio/native changes or staging. Corrected malformed Work Sessions rows for [7.25]/[7.26].
+
+### 2026-10-08T00:22:26.000Z — [7.27] Keyboard-free touch editor approved
+
+Owner approves proposed slider/fine-step/starting-restore editor. Spec keyboard-first wording revised and all three sections reviewed/reapproved under explicit proceed/delegation. Technical design in [DES-TOUCH-EDITOR] records real Patch preview path,30Hz bound, discrete choices, native scaling, draft Apply boundary and stale ownership/cleanup. Two existing agents handle shared editor and read-only lifecycle audit; root integrates. Physical phone/listening acceptance pending, source unstaged.
+
+### 2026-10-08T00:39:35.000Z — [7.27] Touch editor verified and deployed
+
+Compact keyboard-free T3K readout editor with relative slider, finite native scales, fine steps, exact starting restore and explicit typing. Ordinary Patch values use real setters at bounded30Hz; calibration/coupled pan remain release-only and drafts retain visible Apply. Native authoritative readiness and changed-owner/full-board closure protect queued edits; generic server-receipt race is documented. First rendered version was too tall and retained background focus; compact final and Done focus visually pass344/414px plus desktop. All115 tests/build pass, including stale opening leak reproduction/fix. Native-precision local gain Restore verified, then draft Refresh; actual owner clean Rx Bogner Fullstack and native/audio settings preserved. Exact guarded publish/hash/rollback evidence and physical phone/audio limits in [DES-TOUCH-EDITOR]. Agent gate complete; Human remains unchecked; source unstaged.
