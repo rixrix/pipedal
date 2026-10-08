@@ -30,7 +30,7 @@ const blockGain = tone3000NumberPresentation("https://www.tone3000.com/plugin:in
  */
 function StoredChain({ title, state }: { title: string; state: Tone3000PreviewState }) {
     const summary = state.summary;
-    return <Paper variant="outlined" sx={{ p: 2 }}>
+    return <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, minWidth: 0, overflowWrap: "anywhere" }}>
         <Typography variant="subtitle1">{title}</Typography>
         <Typography variant="body2">{summary.activePresetName || "Unnamed rig"}</Typography>
         <Typography variant="body2">{state.namCount} NAM · {state.irCount} IR · {state.embeddedBytes.toLocaleString()} embedded bytes</Typography>
@@ -95,10 +95,13 @@ export default function Tone3000PresetPreviewDialog({ selection, onClose, onConf
         : selection?.action === "addNew" ? "Add as new" : "Add";
     const canConfirm = connected && !read.loading && !!result && !!selection
         && result.sha256 === selection.entry.sha256 && (!updating || !result.hasUnsavedChanges);
-    return <DialogEx tag="tone3000PresetPreview" open={selection !== null} onClose={onClose} fullWidth maxWidth="md">
-        <DialogTitle>{updating ? "Review Update" : "Preview rig"}: {selection?.entry.name}</DialogTitle>
-        <DialogContent dividers>
-            <Stack spacing={2}>
+    return <DialogEx tag="tone3000PresetPreview" open={selection !== null} onClose={onClose} fullWidth maxWidth="md"
+        sx={{ "& .MuiDialog-paper": { m: { xs: 0, sm: 4 }, width: { xs: "100%", sm: "calc(100% - 64px)" },
+            minWidth: 0, maxWidth: { xs: "100%", sm: 900 }, maxHeight: { xs: "100%", sm: "calc(100% - 64px)" } },
+            "& .MuiButton-root": { minHeight: 44 } }}>
+        <DialogTitle sx={{ px: { xs: 1.5, sm: 3 }, overflowWrap: "anywhere" }}>{updating ? "Review Update" : "Preview rig"}: {selection?.entry.name}</DialogTitle>
+        <DialogContent dividers sx={{ p: { xs: 1.5, sm: 3 }, minWidth: 0 }}>
+            <Stack spacing={2} sx={{ minWidth: 0 }}>
                 <Alert severity="info">Preview reads saved data only. It does not play audio, load a rig or save changes.</Alert>
                 {read.loading && <CircularProgress size={24} aria-label="Reading saved preview" />}
                 {read.error && <Alert severity="error">{read.error}</Alert>}
