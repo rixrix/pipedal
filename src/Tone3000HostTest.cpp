@@ -962,6 +962,7 @@ class MixMatchGraph {
     float input[2][64]{},output[2][64]{};
     std::map<LV2_URID,float> patchValues;
     uint64_t token=100;
+    uint64_t processedBlocks=0;
 public:
     struct Observation {
         std::vector<float> samples;
@@ -978,12 +979,25 @@ public:
         graph->Activate();
     }
     ~MixMatchGraph(){if(graph)graph->Deactivate();}
-    double Run(Lv2Effect* patchEffect=nullptr,LV2_URID requestedProperty=0){
+    double Run(Lv2Effect* patchEffect=nullptr,LV2_URID requestedProperty=0,const Pedalboard* restorePitch=nullptr){
         float* in[]{input[0],input[1]};float* out[]{output[0],output[1]};
         graph->ResetAtomBuffers();
         if(patchEffect)patchEffect->RequestPatchProperty(requestedProperty);
+        if(restorePitch)for(const auto& item:restorePitch->items()){
+            if(item.uri()==Tone3000Preset::PLUGIN_URI){
+                auto* effect=dynamic_cast<Lv2Effect*>(graph->GetEffect(item.instanceId()));REQUIRE(effect);
+                LV2_Atom_Float atom={{sizeof(float),host.GetLv2Urid(LV2_ATOM__Float)},static_cast<float>(Tone3000Preset::ParameterValue(item.lv2State(),"pitchEnabled"))};
+                effect->SetPatchProperty(host.GetLv2Urid("https://www.tone3000.com/plugin:pitchEnabled"),sizeof(atom),reinterpret_cast<LV2_Atom*>(&atom));
+            }else if(item.uri()==Tone3000MixMatch::PITCH_URI){
+                const auto* enabled=item.GetControlValue("enabled");REQUIRE(enabled);
+                const int index=graph->GetControlIndex(item.instanceId(),"enabled");REQUIRE(index>=0);
+                const int effect=graph->GetIndexOfInstanceId(item.instanceId());REQUIRE(effect>=0);
+                graph->SetControlValue(effect,index,enabled->value());
+            }
+        }
         const auto started=std::chrono::steady_clock::now();
         const bool processed=graph->Run(in,out,64,&writer);
+        ++processedBlocks;
         const auto elapsed=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-started).count();
         REQUIRE(processed);
         if(patchEffect){
@@ -1087,7 +1101,25 @@ public:
         return result;
     }
     void Warm(){for(int i=0;i<750;++i){Run();std::this_thread::sleep_for(std::chrono::microseconds(1333));}}
+    uint64_t Blocks()const{return processedBlocks;}
+    void StartPitchTimeline(const Pedalboard& requested){Run(nullptr,0,&requested);}
 };
+// Readiness and Patch Gets consume a variable number of silent audio blocks.
+// JUCE LV2 activate/deactivate only invalidate the playhead; they do not reset
+// DSP. Keep pitch initially disabled (native engine is not running), then enable
+// the requested setting on one known block after all pre-render observations.
+// The native fresh-enable path resets its rings/taps; subsequent warmup and DI
+// advance an identical sample timeline. Final readback still checks the exact
+// requested 43 parameters, without changing the repeat-control tolerance.
+// @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [7.37]
+Pedalboard MixMatchPitchOffStart(Pedalboard& requested){
+    auto initial=requested.DeepCopy();
+    for(auto* item:initial.GetAllPlugins()){
+        if(item->uri()==Tone3000Preset::PLUGIN_URI)item->lv2State(Tone3000Preset::WithPitchDisabled(item->lv2State()));
+        else if(item->uri()==Tone3000MixMatch::PITCH_URI){auto* enabled=item->GetControlValue("enabled");REQUIRE(enabled);enabled->value(0);}
+    }
+    return initial;
+}
 double MixMatchResidual(const MixMatchGraph::Observation& a,const MixMatchGraph::Observation& b){
     REQUIRE(a.samples.size()==b.samples.size());double sum=0;for(size_t i=0;i<a.samples.size();++i){auto d=double(a.samples[i])-b.samples[i];sum+=d*d;}
     return std::sqrt(sum/a.samples.size());
@@ -1157,13 +1189,25 @@ TEST_CASE("TONE3000 actual-host mixed Amp Cab Pitch graphs", "[.][gig_rig_mixmat
     auto pitchOffRequest=request;pitchOffRequest.expectedRevision_=Tone3000Performance::Revision(pitchOffSource);
     auto pitchOffPrepared=Tone3000MixMatch::Prepare(pitchOffSource,pitchOffRequest,true);
     for(bool antiphase:{false,true}){
-        auto render=[&](Pedalboard board){MixMatchGraph graph(host,board);graph.WaitLoaded(board);graph.Warm();graph.VerifyParameters(board);auto observation=graph.Render(antiphase);graph.VerifyParameters(board);return observation;};
-        const auto original=render(source),repeat=render(source),split=render(prepared.board),withDelay=render(delayed);
-        const auto pitchOffOriginal=render(pitchOffSource),pitchOffSplit=render(pitchOffPrepared.board);
-        const auto repeatedResidual=MixMatchResidual(original,repeat),partitionResidual=MixMatchResidual(original,split),delayResidual=MixMatchResidual(split,withDelay);
-        const auto aligned=AlignMixMatch(original,split),pitchOffAligned=AlignMixMatch(pitchOffOriginal,pitchOffSplit);
+        auto render=[&](Pedalboard board){
+            auto initial=MixMatchPitchOffStart(board);MixMatchGraph graph(host,initial);
+            graph.WaitLoaded(initial);graph.VerifyParameters(initial);
+            graph.StartPitchTimeline(board);const auto start=graph.Blocks();
+            graph.Warm();REQUIRE(graph.Blocks()-start==750);
+            auto observation=graph.Render(antiphase);REQUIRE(graph.Blocks()-start==3000);
+            std::cout<<"Mix-match controlled pitch timeline: pitchOffLoadVerified=true warmupBlocks=750 renderBlocks=2250 blockFrames=64 preRenderReadbacksAfterEnable=0\n";
+            graph.VerifyParameters(board);return observation;
+        };
+        const auto original=render(source),repeat=render(source);
+        const auto repeatedResidual=MixMatchResidual(original,repeat);
+        std::cout<<"Mix-match repeat-control gate: antiphase="<<antiphase<<" relativeResidual="<<repeatedResidual/std::max(original.rms,repeat.rms)
+            <<" requiredBelow=0.0001 originalFloatSha256="<<original.hash<<" repeatFloatSha256="<<repeat.hash<<std::endl;
         // A deterministic baseline must repeat before assessing derived residuals.
         REQUIRE(repeatedResidual/std::max(original.rms,repeat.rms)<.0001);
+        const auto split=render(prepared.board),withDelay=render(delayed);
+        const auto pitchOffOriginal=render(pitchOffSource),pitchOffSplit=render(pitchOffPrepared.board);
+        const auto partitionResidual=MixMatchResidual(original,split),delayResidual=MixMatchResidual(split,withDelay);
+        const auto aligned=AlignMixMatch(original,split),pitchOffAligned=AlignMixMatch(pitchOffOriginal,pitchOffSplit);
         REQUIRE(delayResidual>1e-6);REQUIRE(std::abs(withDelay.tailRms-split.tailRms)>1e-8);
         std::cout<<"Mix-match actual graph DI: antiphase="<<antiphase<<" originalRms="<<original.rms<<" splitRms="<<split.rms<<" delayRms="<<withDelay.rms<<" originalPeak="<<original.peak<<" delayPeak="<<withDelay.peak<<" originalRunMeanUs="<<original.meanRunUs<<" originalRunMaxUs="<<original.maxRunUs<<" repeatedResidual="<<repeatedResidual<<" partitionResidual="<<partitionResidual<<" delayResidual="<<delayResidual<<" splitTailRms="<<split.tailRms<<" delayTailRms="<<withDelay.tailRms
             <<" splitPeak="<<split.peak<<" splitRunMeanUs="<<split.meanRunUs<<" splitRunMaxUs="<<split.maxRunUs<<" delayRunMeanUs="<<withDelay.meanRunUs<<" delayRunMaxUs="<<withDelay.maxRunUs<<" splitFloatSha256="<<split.hash<<" qualified=false audibleComparison=false deviceLatencyMeasured=false networkIsolationProven=false\n";
