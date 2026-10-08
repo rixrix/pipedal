@@ -26,10 +26,18 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
+#include <iterator>
 #include <sys/stat.h>
 #include <unistd.h>
 
 using namespace pipedal;
+
+namespace pipedal::detail {
+std::vector<std::pair<size_t, bool>> ConsumeFileUploadForTest(
+    const std::filesystem::path&, const std::vector<std::string>&, std::error_code&,
+    const std::function<void(const std::filesystem::path&, std::istream&)>&);
+}
 
 namespace {
 class StaticFileServer {
@@ -142,4 +150,74 @@ TEST_CASE("WebServer shutdown", "[webServerShutdown][Build][Dev]")
         REQUIRE(finalMemory.allocations == initialMemory.allocations);
     }
 
+}
+
+/** Ready means the independent HTTP body reader sees every binary byte.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [DES-SEC] [7.37]
+ */
+TEST_CASE("WebServer upload completion flushes every packet grouping", "[webServerUpload][Build]")
+{
+    struct TemporaryDirectory {
+        std::filesystem::path path;
+        TemporaryDirectory() {
+            auto pattern = (std::filesystem::temp_directory_path() / "pipedal-upload-test-XXXXXX").string();
+            std::vector<char> name(pattern.begin(), pattern.end()); name.push_back(0);
+            auto directory = mkdtemp(name.data());
+            if (!directory) throw std::runtime_error("Upload fixture creation failed");
+            path = directory;
+        }
+        ~TemporaryDirectory() { std::error_code ignored; std::filesystem::remove_all(path, ignored); }
+    } temporary;
+    std::string body(2049, '\0');
+    for (size_t i = 0; i < body.size(); ++i) body[i] = static_cast<char>(i % 256);
+    const std::string header = "POST /var/uploadTone3000Preset?filename=fixture.t3kpreset HTTP/1.1\r\nHost: localhost\r\nContent-Length: "
+        + std::to_string(body.size()) + "\r\nContent-Type: application/octet-stream\r\n\r\n";
+    std::vector<std::string> chunks;
+    bool complete = true;
+    SECTION("Headers and complete body in one chunk") { chunks = {header + body}; }
+    SECTION("Headers then complete body") { chunks = {header, body}; }
+    SECTION("Split header ends with complete body") { chunks = {header.substr(0, 13), header.substr(13) + body}; }
+    SECTION("Partial body then continuation") { chunks = {header + body.substr(0, 21), body.substr(21)}; }
+    SECTION("One byte chunks") {
+        for (char byte : header + body) chunks.emplace_back(1, byte);
+    }
+    SECTION("Trailing request bytes are not part of the body") { chunks = {header + body + "NEXT", "LATER"}; }
+    SECTION("Incomplete body never becomes ready") { chunks = {header + body.substr(0, body.size() - 1)}; complete = false; }
+    SECTION("Incomplete header never becomes ready") { chunks = {header.substr(0, header.size() - 1)}; complete = false; }
+    SECTION("Temporary output failure never becomes ready") {
+        std::ofstream file(temporary.path / "not-a-directory"); file << "existing"; file.close();
+        temporary.path /= "not-a-directory";
+        std::error_code error; bool inspected = false;
+        const auto progress = pipedal::detail::ConsumeFileUploadForTest(temporary.path, {header + body}, error,
+            [&](const auto&, auto&) { inspected = true; });
+        REQUIRE(error); REQUIRE(progress.size() == 1); REQUIRE_FALSE(progress.back().second); REQUIRE_FALSE(inspected);
+        temporary.path = temporary.path.parent_path();
+        return;
+    }
+    bool inspected = false;
+    std::filesystem::path uploadPath;
+    std::error_code error;
+    const auto progress = pipedal::detail::ConsumeFileUploadForTest(temporary.path, chunks, error,
+        [&](const auto& path, std::istream& stream) {
+            inspected = true; uploadPath = path;
+            REQUIRE(std::filesystem::file_size(path) == body.size());
+            const std::string actual((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+            REQUIRE(actual == body); REQUIRE_FALSE(stream.bad());
+            std::ifstream independent(path, std::ios::binary);
+            REQUIRE(independent.good());
+            const std::string disk((std::istreambuf_iterator<char>(independent)), std::istreambuf_iterator<char>());
+            REQUIRE(disk == body);
+        });
+    REQUIRE_FALSE(error); REQUIRE(progress.size() == chunks.size()); REQUIRE(inspected == complete);
+    if (complete) {
+        REQUIRE(progress.back().second);
+        REQUIRE_FALSE(std::filesystem::exists(uploadPath)); // Parser-owned temporary cleanup.
+        if (chunks.back() == "LATER") {
+            REQUIRE(progress.front().first == header.size() + body.size()); REQUIRE(progress.back().first == 0);
+        }
+    } else REQUIRE_FALSE(progress.back().second);
+    // Every completed request becomes ready only at the final required body byte.
+    if (chunks.size() > 1 && chunks.back() != "LATER") {
+        for (size_t i = 0; i + 1 < progress.size(); ++i) REQUIRE_FALSE(progress[i].second);
+    }
 }
