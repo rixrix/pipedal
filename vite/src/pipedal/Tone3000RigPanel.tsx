@@ -25,11 +25,32 @@ import { tone3000BlockChanges, tone3000ValidBlocks } from "./Tone3000Rig";
 import type { Tone3000Block, Tone3000CurrentState, Tone3000Defaults, Tone3000DefaultsResult,
     Tone3000EqBand, Tone3000StatePatch, Tone3000Summary } from "./Tone3000Rig";
 
-const gearLabels: Record<string, string> = {
-    amp: "Amp Head", "amp-cab": "Amp + Cab", "full-rig": "Full Rig", cab: "Cabinet",
-    pedal: "Pedal", outboard: "Outboard", ir: "IR", space: "Space", experimental: "Experimental"
-};
+import { tone3000GearLabel } from "./Tone3000Gear";
+import { tone3000DraftNumber, tone3000FormatNumber, tone3000SameDraftNumber } from "./Tone3000MobileLayout";
+
 const rowStyle = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 };
+
+/** Equal cells keep drafted fields and switch targets aligned without changing their events.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-VISUAL-ALIGN] [7.16]
+ */
+const fieldGridStyle = {
+    display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
+    alignItems: "start", gap: 2, minWidth: 0,
+    "& > .MuiFormControl-root": { width: "100%", minWidth: 0, maxWidth: "100%" },
+    "& > .MuiFormControlLabel-root": {
+        width: "100%", minHeight: 44, margin: 0, alignSelf: "start",
+        "& .MuiFormControlLabel-label": { whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.4 }
+    },
+    "& .MuiInputBase-root": { minHeight: 44 }
+};
+
+/** Six block controls use at most three columns, retaining two on unfolded phones.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-VISUAL-ALIGN] [7.16]
+ */
+const blockGridStyle = {
+    ...fieldGridStyle,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, max(220px, calc((100% - 32px) / 3))), 1fr))"
+};
 
 /** Subscribe to the existing host settings without introducing duplicate setters.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [DES-OPERATE] [3.13]
@@ -45,15 +66,39 @@ function useHostValue<T>(property: ObservableProperty<T>): T {
 
 /** Reject incomplete or out-of-range numeric drafts.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-13] [DES-OPERATE] [3.13]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [7.14]
  */
 function NumberField({ label, value, min, max, step = .01, onChange }: {
     label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void;
 }) {
-    return <TextField size="small" type="number" label={label}
-        value={Number.isFinite(value) ? Number(value.toFixed(Math.max(0, Math.ceil(-Math.log10(step))))) : ""}
-        onChange={event => onChange(event.target.value === "" ? NaN : Number(event.target.value))}
+    const [text, setText] = useState(() => tone3000FormatNumber(value, step));
+    const focused = useRef(false);
+    const emitted = useRef(value);
+    useEffect(() => {
+        // An authoritative Refresh/replacement must discard even a focused local draft.
+        if (!focused.current || !tone3000SameDraftNumber(value, emitted.current)) {
+            setText(tone3000FormatNumber(value, step));
+            emitted.current = value;
+        }
+    }, [value, step]);
+    return <TextField size="small" type="text" label={label} value={text}
+        onFocus={() => { focused.current = true; }}
+        onBlur={() => { focused.current = false; }}
+        onKeyDown={event => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                event.preventDefault(); (event.target as HTMLInputElement).blur();
+            }
+        }}
+        onChange={event => {
+            setText(event.target.value);
+            // Only edit the local rig/profile draft. Apply remains the server mutation boundary.
+            const number = tone3000DraftNumber(event.target.value);
+            emitted.current = number;
+            onChange(number);
+        }}
         error={!Number.isFinite(value) || value < min || value > max}
-        inputProps={{ min, max, step }} sx={{ width: 160, maxWidth: "100%" }} />;
+        inputProps={{ inputMode: min < 0 ? "text" : step >= 1 ? "numeric" : "decimal", enterKeyHint: "done" }}
+        sx={{ width: "100%", minWidth: 0, maxWidth: "100%", "& .MuiInputBase-root": { minHeight: 44 }, "& input": { fontSize: 16, minHeight: 24 } }} />;
 }
 
 /** Four session parameters also act as processing defaults; they are never tone fields.
@@ -62,14 +107,14 @@ function NumberField({ label, value, min, max, step = .01, onChange }: {
 function ProcessingFields({ value, onChange }: { value: Pick<Tone3000Defaults,
     "calibrateInput" | "inputCalibrationLevel" | "osEnabled" | "osFactor">;
     onChange: (patch: Partial<Tone3000Defaults>) => void }) {
-    return <Box sx={rowStyle}>
+    return <Box className="t3k-field-grid" sx={fieldGridStyle}>
         <FormControlLabel label="Calibration" control={<Switch checked={value.calibrateInput}
             onChange={(_event, checked) => onChange({ calibrateInput: checked })} />} />
-        <NumberField label="Input calibration (dBu)" value={value.inputCalibrationLevel} min={-60} max={60}
+        <NumberField label="Calibration level (dBu)" value={value.inputCalibrationLevel} min={-60} max={60}
             step={.1} onChange={inputCalibrationLevel => onChange({ inputCalibrationLevel })} />
         <FormControlLabel label="Oversampling" control={<Switch checked={value.osEnabled}
             onChange={(_event, checked) => onChange({ osEnabled: checked })} />} />
-        <TextField select size="small" label="Oversampling rate" value={value.osFactor} sx={{ width: 180 }}
+        <TextField select size="small" label="Rate" value={value.osFactor}
             onChange={event => onChange({ osFactor: Number(event.target.value) })}>
             {[2, 4, 8].map((rate, index) => <MenuItem key={rate} value={index}>{rate}×</MenuItem>)}
         </TextField>
@@ -79,30 +124,36 @@ function ProcessingFields({ value, onChange }: { value: Pick<Tone3000Defaults,
 /** Model names and saved block controls use a bounded server-side state projection.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-13] [DES-OPERATE] [3.13]
  */
-function BlockCard({ block, onChange }: { block: Tone3000Block; onChange: (block: Tone3000Block) => void }) {
+function BlockCard({ block, onChange, expanded, onToggle }: { block: Tone3000Block;
+    onChange: (block: Tone3000Block) => void; expanded: boolean; onToggle: (expanded: boolean) => void }) {
     const change = (patch: Partial<Tone3000Block>) => onChange({ ...block, ...patch });
     const changeBand = (index: number, patch: Partial<Tone3000EqBand>) =>
         change({ eq: { ...block.eq, bands: block.eq.bands.map((band, i) => i === index ? { ...band, ...patch } : band) } });
-    return <Paper variant="outlined" component="section" aria-label={block.title || "Empty slot"}
-        sx={{ p: 2, minWidth: 0, borderRadius: 2 }}>
-        <Stack spacing={2}>
-            <Box sx={rowStyle}>
-                <Typography variant="subtitle1" component="h3">{block.title || (block.type === "insert" ? "Empty slot" : "Unnamed block")}</Typography>
-                <Chip size="small" label={gearLabels[block.gear] || block.gear || block.type.toUpperCase()} />
+    return <Accordion disableGutters variant="outlined" expanded={expanded}
+        onChange={(_event, open) => onToggle(open)} TransitionProps={{ unmountOnExit: false }}
+        sx={{ minWidth: 0, borderRadius: 1, boxShadow: "none", "&:before": { display: "none" } }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 56 }}
+            aria-label={"View settings for " + (block.title || "block")} >
+            <Box className="t3k-field-row" sx={{ ...rowStyle, gap: 1, minWidth: 0 }}>
+                <Typography variant="subtitle1" component="h3" sx={{ overflowWrap: "anywhere" }}>{block.title || (block.type === "insert" ? "Empty slot" : "Unnamed block")}</Typography>
+                <Chip size="small" label={tone3000GearLabel(block.gear, block.type)} />
                 <Typography variant="caption">{block.lane === "right" ? "Right" : "Left"} · {block.index + 1}
                     {block.activeModelId !== null && " · Model " + block.activeModelId}</Typography>
             </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+        <Stack spacing={2}>
             {block.type === "insert" ? <Typography variant="body2" color="text.secondary">
                 Add or replace blocks in TONE3000, then update this rig from Library.
             </Typography> : <>
-                <Box sx={rowStyle}>
+                <Box className="t3k-field-grid" sx={blockGridStyle}>
                     <FormControlLabel label="Block enabled" control={<Switch checked={block.enabled}
                         onChange={(_event, enabled) => change({ enabled })} />} />
                     {block.type === "nam" && <>
                         <FormControlLabel label="Normalize" control={<Switch checked={block.normalize}
                             onChange={(_event, normalize) => change({ normalize })} />} />
                         <TextField select size="small" label="Requested NAM size" value={block.slimSize >= .5 ? 1 : 0}
-                            sx={{ width: 210 }} onChange={event => change({ slimSize: Number(event.target.value) })}>
+                            onChange={event => change({ slimSize: Number(event.target.value) })}>
                             <MenuItem value={0}>A2-Lite</MenuItem><MenuItem value={1}>A2-Full</MenuItem>
                         </TextField>
                     </>}
@@ -119,16 +170,16 @@ function BlockCard({ block, onChange }: { block: Tone3000Block; onChange: (block
                     <AccordionSummary expandIcon={<ExpandMoreIcon />}><Typography>Block EQ</Typography></AccordionSummary>
                     <AccordionDetails>
                         <Stack spacing={2}>
-                            <Box sx={rowStyle}>
+                            <Box className="t3k-field-grid" sx={fieldGridStyle}>
                                 <FormControlLabel label="EQ enabled" control={<Switch checked={block.eq.enabled}
                                     onChange={(_event, enabled) => change({ eq: { ...block.eq, enabled } })} />} />
                                 <FormControlLabel label="EQ before model" control={<Switch checked={block.eq.pre}
                                     onChange={(_event, pre) => change({ eq: { ...block.eq, pre } })} />} />
                             </Box>
-                            {block.eq.bands.map((band, index) => <Box key={index} sx={rowStyle}>
-                                <Typography variant="body2" sx={{ width: 52 }}>Band {index + 1}</Typography>
+                            {block.eq.bands.map((band, index) => <Box key={index} className="t3k-field-grid" sx={fieldGridStyle}>
+                                <Typography variant="body2" sx={{ gridColumn: "1 / -1" }}>Band {index + 1}</Typography>
                                 <TextField select size="small" label={"Band " + (index + 1) + " type"}
-                                    value={band.type} sx={{ width: 150 }} onChange={event => changeBand(index, { type: event.target.value })}>
+                                    value={band.type} onChange={event => changeBand(index, { type: event.target.value })}>
                                     {(index === 0 ? ["lowcut", "lowshelf"] : index === 5 ? ["highshelf", "highcut"] : ["bell"])
                                         .map(type => <MenuItem key={type} value={type}>{type}</MenuItem>)}
                                 </TextField>
@@ -144,7 +195,8 @@ function BlockCard({ block, onChange }: { block: Tone3000Block; onChange: (block
                 </Accordion>
             </>}
         </Stack>
-    </Paper>;
+        </AccordionDetails>
+    </Accordion>;
 }
 
 /** The host already owns these fields. This surface only subscribes and reads.
@@ -170,8 +222,8 @@ function SystemSettings({ status }: { status: JackHostStatus | null }) {
         ["CPU / xruns", status?.active ? status.cpuUsage.toFixed(1) + "% / " + status.underruns : "Unavailable"]
     ];
     return <Paper variant="outlined" component="section" sx={{ p: 2 }}>
-        <Typography variant="h6" component="h3">System settings</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Read-only. Managed by PiPedal's existing settings.</Typography>
+        <Typography variant="h6" component="h3">System settings · Global</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Read-only here. Audio and MIDI settings apply across all rigs on this Pi. Change them in PiPedal Settings.</Typography>
         <Box component="dl" sx={{ m: 0, display: "grid", gridTemplateColumns: "minmax(100px, 1fr) minmax(0, 2fr)", gap: 1 }}>
             {rows.map(([label, value]) => <Box key={label} sx={{ display: "contents" }}>
                 <Typography component="dt" variant="body2">{label}</Typography>
@@ -183,6 +235,9 @@ function SystemSettings({ status }: { status: JackHostStatus | null }) {
 
 /** Drafted block/settings edits are explicit; profiles never auto-change playing audio.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [FR-13] [FR-14] [DES-OPERATE] [3.13]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-CONTROL-SCOPE] [7.18]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PLAIN-TOOLS] [7.25]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-VISIBLE-APPLY] [7.26]
  */
 export default function Tone3000RigPanel({ instanceId, section, active, focusedBlock }: {
     instanceId: number; section: "Blocks" | "Settings"; active: boolean; focusedBlock?: Tone3000BlockFocus | null;
@@ -203,16 +258,23 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     const [connected, setConnected] = useState(model.state.get() === State.Ready);
     const [recoveryNotice, setRecoveryNotice] = useState("");
     const blockCards = useRef(new Map<string, HTMLDivElement>());
+    const actionBar = useRef<HTMLDivElement>(null);
     const lastFocused = useRef<Tone3000BlockFocus | null>(null);
+    const [expandedBlock, setExpandedBlock] = useState<string | null>(null);
     useEffect(() => {
         if (!active || section !== "Blocks" || !focusedBlock || lastFocused.current === focusedBlock) return;
+        if (expandedBlock !== focusedBlock.blockId) {
+            setExpandedBlock(focusedBlock.blockId);
+            return;
+        }
         const card = blockCards.current.get(focusedBlock.blockId);
         if (card) {
+            card.style.scrollMarginTop = ((actionBar.current?.offsetHeight ?? 0) + 8) + "px";
             card.scrollIntoView({ block: "start", inline: "nearest", behavior: "smooth" });
             card.focus({ preventScroll: true });
             lastFocused.current = focusedBlock;
         }
-    }, [active, section, focusedBlock, draft]);
+    }, [active, section, focusedBlock, draft, expandedBlock]);
     const alive = useRef(true);
     const working = useRef(false);
     const generation = useRef(0);
@@ -351,8 +413,28 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     });
     const validCalibration = (value: number) => Number.isFinite(value) && value >= -60 && value <= 60;
 
-    return <Stack spacing={2} sx={{ px: 1, maxWidth: 1100 }}>
-        <Box sx={rowStyle}>
+    return <Stack className="t3k-rig-panel" spacing={1.5} sx={{ px: 1, minWidth: 0, maxWidth: 1100,
+        "& .MuiButton-root": { whiteSpace: "normal", minHeight: 44 },
+        "& .MuiFormControl-root": { maxWidth: "100%", minWidth: 0 } }}>
+        {rig && draft && <Box ref={actionBar} role="region" aria-label={section === "Blocks" ? "Apply block changes" : "Apply rig settings"}
+            sx={{ position: "sticky", top: 0, zIndex: 2, bgcolor: "background.paper",
+                borderBottom: 1, borderColor: "divider", p: 1, minWidth: 0 }}>
+            <Stack spacing={.5}>
+                <Button variant="contained" sx={{ alignSelf: "flex-start" }}
+                    disabled={busy || waiting || !connected || stale || !rigDirty.current
+                        || (section === "Blocks" ? !tone3000ValidBlocks(draft.blocks) : !validCalibration(draft.inputCalibrationLevel))}
+                    onClick={() => { void apply(); }}>{section === "Blocks" ? "Apply block changes" : "Apply rig settings"}</Button>
+                <Typography role="status" variant="body2" color="text.secondary">
+                    {!connected ? "Reconnect to the Pi before applying changes."
+                        : busy ? "Applying your changes…"
+                        : waiting ? "Checking your changes. Wait before saving."
+                        : stale ? "This rig changed elsewhere. Refresh before applying."
+                        : rigDirty.current ? "Changes not applied yet. Tap Apply, then PiPedal Save to keep them."
+                        : notice || "Edit the settings below, then tap Apply. PiPedal Save keeps your changes."}
+                </Typography>
+            </Stack>
+        </Box>}
+        <Box className="t3k-field-row" sx={rowStyle}>
             <Typography component="h2" variant="h6">{section === "Blocks" ? "Rig blocks" : "TONE3000 settings"}</Typography>
             <Button disabled={busy || !connected} onClick={() => { void refresh(true); }}>Refresh</Button>
         </Box>
@@ -373,44 +455,54 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                         ref={(card: HTMLDivElement | null) => { if (card) blockCards.current.set(block.blockId, card); else blockCards.current.delete(block.blockId); }}
                         tabIndex={-1} aria-label={"Settings for " + (block.title || "block")}
                         sx={{ minWidth: 0, outline: "none" }}>
-                        <BlockCard block={block}
+                        <BlockCard block={block} expanded={expandedBlock === block.blockId}
+                            onToggle={open => setExpandedBlock(open ? block.blockId : null)}
                             onChange={updated => edit({ blocks: draft.blocks.map(before => before.blockId === updated.blockId ? updated : before) })} />
                     </Box>)}
                     {draft.blocks.some(block => block.type === "insert") && <Typography variant="caption" color="text.secondary">
                         Empty slots are omitted. Add, replace or reorder blocks in TONE3000, then use Library Update.
                     </Typography>}
                     {!draft.blocks.length && <Typography>No blocks loaded. Author a rig in TONE3000 and add it through Library.</Typography>}
-                    <Button variant="contained" disabled={busy || stale || !rigDirty.current || !tone3000ValidBlocks(draft.blocks)}
-                        onClick={() => { void apply(); }}>Apply block changes</Button>
                 </Stack> : <Stack spacing={3}>
                     <SystemSettings status={status} />
                     <Paper component="section" variant="outlined" sx={{ p: 2 }}>
                         <Stack spacing={2}>
                             <Typography component="h3" variant="h6">Plugin settings · Current rig</Typography>
+                            <Typography variant="body2" color="text.secondary">These captured settings belong to this TONE3000 instance in the current rig. Apply changes, then use PiPedal Save to keep them.</Typography>
                             <TextField select size="small" label="Processing policy" value={follow ? "follow" : "saved"}
                                 onChange={event => { rigDirty.current = true; setFollow(event.target.value === "follow"); }}>
                                 <MenuItem value="follow">Follow device defaults</MenuItem>
                                 <MenuItem value="saved">Keep saved settings</MenuItem>
                             </TextField>
                             <ProcessingFields value={draft} onChange={patch => edit(patch, true)} />
-                            <TextField select size="small" label="Plugin input mode" value={draft.inputMode} sx={{ maxWidth: 260 }}
+                            <Typography component="h4" variant="subtitle2">Input routing · This rig</Typography>
+                            <Typography variant="body2" color="text.secondary">Choose which signal TONE3000 receives from the PiPedal blocks before it. Choose the physical interface inputs in PiPedal Audio settings.</Typography>
+                            <TextField select size="small" label="TONE3000 input"
+                                helperText={draft.inputMode === "left" ? "Use the left input signal on both sides."
+                                    : draft.inputMode === "right" ? "Use the right input signal on both sides."
+                                    : draft.inputMode === "dual" ? draft.stereoEnabled
+                                        ? "With two chains, this works like Stereo: left input to the left chain, right input to the right."
+                                        : "Run this chain separately for left and right inputs. Needs stereo input and output; otherwise works like Stereo SUM. Uses more processing power."
+                                    : draft.stereoEnabled ? "Send the left input to the left chain and the right input to the right chain."
+                                    : "Combine the left and right inputs into one signal for this chain."} value={draft.inputMode} sx={{ width: "100%", minWidth: 0 }}
                                 onChange={event => edit({ inputMode: event.target.value })}>
-                                {["stereo", "left", "right", "dual"].map(mode => <MenuItem key={mode} value={mode}>{mode}</MenuItem>)}
+                                {["stereo", "left", "right", "dual"].map(mode => <MenuItem key={mode} value={mode}>
+                                    {mode === "stereo" ? draft.stereoEnabled ? "Stereo" : "Stereo SUM (L+R)"
+                                        : mode === "dual" ? "Stereo Dual Mono (L&R)" : mode === "left" ? "Left" : "Right"}
+                                </MenuItem>)}
                             </TextField>
-                            <Box sx={rowStyle}>
-                                <Button variant="contained" disabled={busy || stale || !rigDirty.current || !validCalibration(draft.inputCalibrationLevel)}
-                                    onClick={() => { void apply(); }}>Apply rig settings</Button>
+                            <Box className="t3k-field-row" sx={rowStyle}>
                                 <Button variant="outlined" disabled={busy || stale || rigDirty.current}
                                     onClick={() => { void apply(true); }}>Apply device defaults to this rig</Button>
                             </Box>
                             <Typography variant="caption" color="text.secondary">Follow applies calibration/oversampling on saved-rig recall.
-                                Editing either selects Keep saved settings. Input routing and block sizes remain rig settings.</Typography>
+                                Editing either selects Keep saved settings. Input routing and block sizes are saved per rig. Rigs with a shared branch must use Left or Right input.</Typography>
                         </Stack>
                     </Paper>
                     {defaults && profileDraft && <Paper component="section" variant="outlined" sx={{ p: 2 }}>
                         <Stack spacing={2}>
-                            <Typography component="h3" variant="h6">Plugin settings · Device defaults</Typography>
-                            <Typography variant="body2" color="text.secondary">Saving defaults stages them for later load/apply.
+                            <Typography component="h3" variant="h6">Plugin defaults · Global</Typography>
+                            <Typography variant="body2" color="text.secondary">Shared PiPedal defaults for this device. Saving stages them for later load/apply; it does not change the playing rig or the standalone T3K app.
                                 Multi-core and default NAM size take effect in newly reloaded instances; saved block sizes remain unchanged.</Typography>
                             <TextField select size="small" label="Processing profile" value={profileId}
                                 onChange={event => {
@@ -421,17 +513,17 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                                     {profile.id === defaults.activeProfile ? " · Active defaults" : ""}</MenuItem>)}
                             </TextField>
                             <ProcessingFields value={profileDraft} onChange={changeProfile} />
-                            <Box sx={rowStyle}>
+                            <Box className="t3k-field-grid" sx={fieldGridStyle}>
                                 <FormControlLabel label="Multi-core processing" control={<Switch checked={profileDraft.multiCore}
                                     onChange={(_event, multiCore) => changeProfile({ multiCore })} />} />
                                 <TextField select size="small" label="Default size for new NAM blocks" value={profileDraft.namSlimSizeDefault}
-                                    sx={{ minWidth: 260 }} onChange={event => changeProfile({ namSlimSizeDefault: Number(event.target.value) })}>
+                                    onChange={event => changeProfile({ namSlimSizeDefault: Number(event.target.value) })}>
                                     <MenuItem value={0}>A2-Lite</MenuItem><MenuItem value={1}>A2-Full</MenuItem>
                                 </TextField>
                             </Box>
                             <Typography variant="caption" color="text.secondary">{{ "service-profile": "Saved PiPedal processing profiles", "app-seed": "Initial values from this Pi’s T3K app", "service-seed": "Initial values from plugin service preferences", "pinned-defaults": "Initial values from T3K defaults" }[defaults.sourceStatus] || defaults.sourceStatus}</Typography>
                             {defaults.warnings.map((warning, index) => <Alert key={index} severity="warning">{warning}</Alert>)}
-                            <Box sx={rowStyle}>
+                            <Box className="t3k-field-row" sx={rowStyle}>
                                 <Button variant="contained" disabled={busy || !profileDirty.current || !validCalibration(profileDraft.inputCalibrationLevel)}
                                     onClick={() => { void saveDefaults(); }}>Save defaults</Button>
                                 <Button disabled={busy || !defaults.appDefaults} onClick={() => {

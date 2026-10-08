@@ -27,9 +27,25 @@ test("all 43 advertised properties have one readable presentation", () => {
     assert.equal(tone3000ControlLayout[0].title, "Tone");
     assert.equal(tone3000ControlLayout[0].sections.flatMap(section => section.controls).length, 12);
     for (const control of controls) {
-        assert.ok(control.label.length > 0 && control.label.length <= 12);
+        // Preserve native wording instead of truncating the calibration field.
+        const maxLength = control.id === "inputCalibrationLevel" ? "Calibration level".length : 12;
+        assert.ok(control.label.length > 0 && control.label.length <= maxLength);
         assert.equal(findTone3000Control("https://www.tone3000.com/plugin:" + control.id)?.label, control.label);
     }
+});
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-FOLD-GEAR] [7.13] */
+test("native wording and phone grouping separate stereo effects from gear categories", () => {
+    assert.deepEqual(tone3000ControlLayout.map(tab => tab.title), ["Tone", "Stereo", "Pitch", "Settings"]);
+    const presentation = id => findTone3000Control("https://www.tone3000.com/plugin:" + id);
+    for (const [id, label] of [["toneMid", "Middle"], ["pitchWindow", "Buffer"],
+        ["inputCalibrationLevel", "Calibration level"], ["osFactor", "Rate"]])
+        assert.equal(presentation(id).label, label);
+    for (const id of ["spreadEnabled", "alignEnabled", "outputBalance", "chainPanLinked", "chainSoloRight", "chainInvertLeft"])
+        assert.equal(presentation(id).tab, "Stereo");
+    assert.equal(presentation("alignOffset").section, "Align");
+    for (const id of ["calibrateInput", "inputCalibrationLevel", "osEnabled", "osFactor"])
+        assert.equal(presentation(id).tab, "Settings");
 });
 
 /**

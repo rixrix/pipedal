@@ -50,7 +50,7 @@ const FONT_SIZE = "0.8em";
 
 
 function isMobileDevice() {
-    return (navigator.maxTouchPoints && navigator.maxTouchPoints > 1);
+    return Utility.hasIMEKeyboard() || navigator.maxTouchPoints > 0;
 }
 
 
@@ -128,13 +128,16 @@ export const pluginControlStyles = (theme: Theme) => createStyles({
         textAlign: "center",
         background: "transparent",
         color: theme.palette.text.secondary,
+        // Native input receives the user gesture, including Android IME focus.
+        pointerEvents: "none",
         // zIndex: -1,
     }),
     midSection: css({
         flex: "1 1 1", display: "flex", flexFlow: "column nowrap", alignContent: "center", justifyContent: "center"
     }),
     editSection: css({
-        flex: "0 0 0", display: "flex", flexFlow: "column nowrap", justifyContent: "center", position: "relative", width: 60, height: 28, minHeight: 28
+        flex: "0 0 0", display: "flex", flexFlow: "column nowrap", justifyContent: "center", position: "relative", width: 60, height: 28, minHeight: 28,
+        '@media (any-pointer: coarse)': { height: 44, minHeight: 44 }
     })
 
 });
@@ -146,9 +149,13 @@ export interface PluginControlProps extends WithStyles<typeof pluginControlStyle
     value: number;
     onPreviewChange?: (value: number) => void;
     onChange: (value: number) => void;
+    onResetToDefault?: (value: number) => void;
     theme: Theme;
     requestIMEEdit: (uiControl: UiControl, value: number) => void;
     options?: { slimmableWeights?: number[] }
+    /** T3K-only equal cells; stock controls keep their existing presentation.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-VISUAL-ALIGN] [7.16] */
+    uniformLayout?: boolean;
 }
 export type PluginControlState = {
     error: boolean;
@@ -261,7 +268,7 @@ const PluginControl =
                 this.onInputChange = this.onInputChange.bind(this);
                 this.onInputLostFocus = this.onInputLostFocus.bind(this);
                 this.onInputFocus = this.onInputFocus.bind(this);
-                this.onInputKeyPress = this.onInputKeyPress.bind(this);
+                this.onInputKeyDown = this.onInputKeyDown.bind(this);
             }
             isTouchDevice(): boolean {
                 return Utility.needsZoomedControls();
@@ -282,6 +289,34 @@ const PluginControl =
                 this.hideZoomedControl();
             }
             inputChanged: boolean = false;
+            private inputContext?: string;
+
+            /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MOBILE-ENTRY] [7.12] */
+            inputContextKey(): string {
+                return JSON.stringify([this.props.instanceId, this.props.uiControl?.symbol,
+                    this.model.banks.get().selectedBank, this.model.presets.get().selectedInstanceId,
+                    this.model.pedalboard.get().selectedSnapshot, this.model.state.get()]);
+            }
+
+            /** Keep a focused native input mounted and preserve its draft on readback.
+             * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MOBILE-ENTRY] [7.12]
+             */
+            componentDidUpdate(previous: PluginControlProps): void {
+                const input = this.inputRef.current;
+                const control = this.props.uiControl;
+                if (!input || !control) return;
+                const changedControl = previous.instanceId !== this.props.instanceId
+                    || previous.uiControl?.symbol !== control.symbol;
+                if (changedControl || (this.inputContext !== undefined && this.inputContext !== this.inputContextKey())) {
+                    this.inputChanged = false;
+                    this.inputContext = undefined;
+                    input.value = control.formatShortValue(this.props.value);
+                    if (document.activeElement === input) input.blur();
+                    this.setState({ editFocused: false, error: false });
+                } else if (document.activeElement !== input && !this.state.editFocused) {
+                    input.value = control.formatShortValue(this.props.value);
+                }
+            }
 
             onInputLostFocus(event: any): void {
                 this.setState({ editFocused: false });
@@ -291,23 +326,24 @@ const PluginControl =
                     this.validateInput(event, true);
 
                 }
+                this.inputContext = undefined;
 
                 //this.displayValueRef.current!.style.display = "block";
             }
-            onInputFocus(event: SyntheticEvent): void {
-                //this.displayValueRef.current!.style.display = "none";
+            onInputFocus(_event: SyntheticEvent): void {
+                this.inputContext = this.inputContextKey();
+                this.inputChanged = false;
                 this.setState({ editFocused: true });
-                // if (Utility.hasIMEKeyboard()) {
-                //     event.preventDefault();
-                //     event.stopPropagation();
-                //     this.inputRef.current?.blur();
-                //     this.props.requestIMEEdit(nullCast(this.props.uiControl), this.props.value)
-                // }
+                this.inputRef.current?.select();
             }
-            onInputKeyPress(e: any): void {
-                if (e.charCode === 13 && this.inputChanged) {
-                    this.inputChanged = false;
-                    this.validateInput(e, true);
+            onInputKeyDown(e: any): void {
+                if (e.key === "Enter" && !e.isComposing && !e.nativeEvent?.isComposing) {
+                    e.preventDefault();
+                    if (this.inputChanged) {
+                        this.inputChanged = false;
+                        this.validateInput(e, true);
+                    }
+                    this.inputRef.current?.blur();
                 }
             }
 
@@ -317,16 +353,22 @@ const PluginControl =
             }
             validateInput(event: any, commitValue: boolean) {
                 if (!this.inputRef.current) return;
+                if (this.inputContext !== this.inputContextKey()) {
+                    this.inputRef.current.value = this.props.uiControl?.formatShortValue(this.props.value) ?? "";
+                    this.setState({ error: false });
+                    return;
+                }
 
-                let text = this.inputRef.current.value;
+                let text = this.inputRef.current.value.trim();
                 let valid = false;
                 let result: number = this.currentValue;
                 try {
                     if (text.length === 0) {
                         valid = false;
                     } else {
-                        let v = Number(text);
-                        if (isNaN(v)) {
+                        // Decimal keyboards can use the locale comma separator.
+                        let v = Number(text.replace(",", "."));
+                        if (!Number.isFinite(v)) {
                             valid = false;
                         } else {
                             valid = true;
@@ -340,7 +382,11 @@ const PluginControl =
                 if (commitValue) {
                     this.setState({ error: false });
                     if (!valid) {
-                        result = this.currentValue; // reset the value!
+                        // Stock ports preview live audio while typing. Restore
+                        // that preview without saving or dirtying the control.
+                        this.previewInputValue(this.props.value, false);
+                        this.inputRef.current.value = this.props.uiControl?.formatShortValue(this.props.value) ?? "";
+                        return;
                     }
                     // clamp and quantize.
                     let range = this.props.uiControl?.valueToRange(result) ?? 0;
@@ -538,7 +584,10 @@ const PluginControl =
 
             resetToDefaultValue(uiControl: UiControl): void {
                 let value = uiControl.default_value;
-                this.model.setPedalboardControl(this.props.instanceId, uiControl.symbol, value);
+                // Patch properties use their own setter and may display converted units.
+                // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.3]
+                if (this.props.onResetToDefault) this.props.onResetToDefault(value);
+                else this.model.setPedalboardControl(this.props.instanceId, uiControl.symbol, value);
             }
             onPointerDoubleTap() {
                 let uiControl = this.props.uiControl;
@@ -861,7 +910,7 @@ const PluginControl =
                                     id: 'id' + control.symbol,
                                     style: { fontSize: FONT_SIZE }
                                 }}
-                                style={{ marginLeft: 4, marginRight: 4, width: 140, fontSize: 14 }}
+                                style={{ marginLeft: 4, marginRight: 4, width: this.props.uniformLayout ? 104 : 140, fontSize: 14 }}
                             >
                                 {control.scale_points.map((scale_point: ScalePoint) => (
                                     <MenuItem key={scale_point.value} value={scale_point.value}>{scale_point.label}</MenuItem>
@@ -895,14 +944,6 @@ const PluginControl =
             currentValue: number = 0;
             uiControl?: UiControl = undefined;
 
-            private defaultStep(min: number, max: number): number {
-                let range = Math.abs(max - min);
-                if (range <= 1) return 0.01;
-                if (range <= 10) return 0.1;
-                if (range <= 100) return 1;
-                if (range <= 1000) return 10;
-                return 100;
-            }
             render() {
                 const classes = withStyles.getClasses(this.props);
                 let t = this.props.uiControl;
@@ -949,28 +990,32 @@ const PluginControl =
                 if (isGraphicEq) {
                     item_width = 58;
                 }
+                const uniform = this.props.uniformLayout;
+                if (uniform) item_width = 112;
 
 
                 return (
                     <div ref={this.frameRef}
                         className={classes.controlFrame}
-                        style={{ width: item_width }}
+                        style={{ width: item_width, ...(uniform ? { height: 144, flexShrink: 0 } : {}) }}
                     >
                         {/* TITLE SECTION */}
                         <div className={classes.titleSection}
                             style={
                                 {
-                                    alignSelf: "stretch", marginBottom: 8, marginLeft: isSelect ? 8 : 0, marginRight: 0
+                                    alignSelf: "stretch", marginBottom: 8, marginLeft: uniform ? 0 : isSelect ? 8 : 0, marginRight: 0,
+                                    ...(uniform ? { height: 36, display: "flex", alignItems: "center" } : {})
 
                                 }}>
-                            <Typography variant="caption" display="block" noWrap style={{
+                            <Typography variant="caption" display="block" noWrap={!uniform} style={{
                                 width: "100%",
-                                textAlign: isSelect ? "left" : "center"
+                                textAlign: uniform ? "center" : isSelect ? "left" : "center",
+                                ...(uniform ? { lineHeight: "18px", overflowWrap: "anywhere" as const } : {})
                             }}> {isButton ? "\u00A0" : control.name}</Typography>
                         </div>
                         {/* CONTROL SECTION */}
 
-                        <div className={classes.midSection}>
+                        <div className={classes.midSection} style={uniform ? { height: 44, flex: "0 0 44px", alignItems: "center" } : undefined}>
 
                             {isButton ?
                                 (
@@ -1126,29 +1171,29 @@ const PluginControl =
                         </div>
 
                         {/* LABEL/EDIT SECTION*/}
-                        <div className={classes.editSection} >
+                        <div className={classes.editSection} style={uniform ? { height: 44, minHeight: 44, flex: "0 0 44px" } : undefined}>
                             {(!(isSelect || isOnOffSwitch || isButton)) &&
                                 (
                                     (isAbSwitch) ? (
                                         <Typography variant="caption" display="block" textAlign="center" noWrap style={{
-                                            width: "100%"
+                                            width: "100%", ...(uniform ? { fontSize: "12.8px" } : {})
                                         }}> {switchText} </Typography>
                                     ) : (
                                         <div>
-                                            <Input key={value}
+                                            <Input
                                                 defaultValue={control.formatShortValue(value)}
                                                 error={this.state.error}
                                                 inputProps={{
                                                     className: "scrollMod",
                                                     type: isMobileDevice() ? "text" : "number",
-                                                    inputMode: "numeric",
+                                                    inputMode: control.min_value < 0 ? "text" : control.integer_property ? "numeric" : "decimal",
+                                                    enterKeyHint: "done",
+                                                    'aria-label': control.name + " value",
+                                                    autoComplete: "off",
 
                                                     min: this.props.uiControl?.min_value,
                                                     max: this.props.uiControl?.max_value,
-                                                    step: this.defaultStep(
-                                                        this.props.uiControl?.min_value ?? 0,
-                                                        this.props.uiControl?.max_value ?? 100
-                                                    )
+                                                    step: control.integer_property ? 1 : "any"
                                                 }}
 
                                                 sx={{
@@ -1158,6 +1203,9 @@ const PluginControl =
                                                         opacity: this.state.editFocused ? 1 : 0,
                                                         textAlign: "center", fontSize: FONT_SIZE,
                                                         borderBottom: "0px",
+                                                        '@media (any-pointer: coarse)': {
+                                                            height: 44, boxSizing: "border-box", fontSize: 16
+                                                        }
                                                     },
                                                 }}
 
@@ -1165,12 +1213,13 @@ const PluginControl =
                                                 onBlur={this.onInputLostFocus}
                                                 onFocus={this.onInputFocus}
 
-                                                onKeyPress={this.onInputKeyPress} />
+                                                onKeyDown={this.onInputKeyDown} />
                                             <div className={classes.displayValue}
-                                                ref={this.displayValueRef} onClick={(e) => { this.inputRef.current!.focus(); }}
-                                                style={{ display: this.state.editFocused ? "none" : "block" }}
+                                                ref={this.displayValueRef} aria-hidden="true"
+                                                style={{ display: this.state.editFocused ? "none" : uniform ? "flex" : "block",
+                                                    ...(uniform ? { bottom: 0, alignItems: "center", justifyContent: "center" } : {}) }}
                                             >
-                                                <Typography noWrap color="inherit" style={{ fontSize: "12.8px", paddingTop: 4, paddingBottom: 6 }}
+                                                <Typography noWrap color="inherit" style={{ fontSize: "12.8px", paddingTop: uniform ? 0 : 4, paddingBottom: uniform ? 0 : 6 }}
 
                                                 >
                                                     {this.formatDisplayValue(control, value)}</Typography>

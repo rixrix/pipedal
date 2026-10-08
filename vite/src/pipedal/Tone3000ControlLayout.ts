@@ -8,8 +8,9 @@ export interface Tone3000ControlSection {
 }
 
 /**
- * All 43 v0.0.11 parameter IDs, grouped without translating their units.
+ * All 43 pinned parameter IDs, grouped without translating their units.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-UI] [2.10]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-FOLD-GEAR] [7.13]
  */
 export const tone3000ControlLayout: readonly {
     title: string;
@@ -25,7 +26,7 @@ export const tone3000ControlLayout: readonly {
             { title: "Tone stack", controls: [
                 { id: "toneEqEnabled", label: "Tone on" },
                 { id: "toneBass", label: "Bass" },
-                { id: "toneMid", label: "Mid" },
+                { id: "toneMid", label: "Middle" },
                 { id: "toneTreble", label: "Treble" }
             ] },
             { title: "Noise gate", controls: [
@@ -38,7 +39,7 @@ export const tone3000ControlLayout: readonly {
         ]
     },
     {
-        title: "Space", sections: [
+        title: "Stereo", sections: [
             { title: "Spread", controls: [
                 { id: "spreadEnabled", label: "Spread on" },
                 { id: "spreadOffset", label: "Offset" },
@@ -48,7 +49,7 @@ export const tone3000ControlLayout: readonly {
                 { id: "spreadCrossoverEnabled", label: "Cross on" },
                 { id: "spreadDiffuseEnabled", label: "Diffuse on" }
             ] },
-            { title: "Alignment", controls: [
+            { title: "Align", controls: [
                 { id: "alignEnabled", label: "Align on" },
                 { id: "alignOffset", label: "Offset" },
                 { id: "alignWobble", label: "Wobble" },
@@ -56,6 +57,16 @@ export const tone3000ControlLayout: readonly {
                 { id: "alignCrossover", label: "Crossover" },
                 { id: "alignCrossoverEnabled", label: "Cross on" },
                 { id: "alignDiffuseEnabled", label: "Diffuse on" }
+            ] },
+            { title: "Stereo routing", controls: [
+                { id: "outputBalance", label: "Balance" },
+                { id: "chainPanLeft", label: "Left pan" },
+                { id: "chainPanRight", label: "Right pan" },
+                { id: "chainPanLinked", label: "Link pans" },
+                { id: "chainSoloLeft", label: "Solo left" },
+                { id: "chainSoloRight", label: "Solo right" },
+                { id: "chainInvertLeft", label: "Invert left" },
+                { id: "chainInvertRight", label: "Invert right" }
             ] }
         ]
     },
@@ -66,29 +77,19 @@ export const tone3000ControlLayout: readonly {
                 { id: "pitchSemitones", label: "Semitones" },
                 { id: "pitchStep", label: "Step" },
                 { id: "pitchTonality", label: "Tonality" },
-                { id: "pitchWindow", label: "Window" }
+                { id: "pitchWindow", label: "Buffer" }
             ] }
         ]
     },
     {
-        title: "Setup", sections: [
-            { title: "Stereo routing", controls: [
-                { id: "outputBalance", label: "Balance" },
-                { id: "chainPanLeft", label: "Left pan" },
-                { id: "chainPanRight", label: "Right pan" },
-                { id: "chainPanLinked", label: "Link pans" },
-                { id: "chainSoloLeft", label: "Solo left" },
-                { id: "chainSoloRight", label: "Solo right" },
-                { id: "chainInvertLeft", label: "Invert left" },
-                { id: "chainInvertRight", label: "Invert right" }
-            ] },
-            { title: "Input calibration", controls: [
-                { id: "calibrateInput", label: "Calibrate" },
-                { id: "inputCalibrationLevel", label: "Cal. level" }
+        title: "Settings", sections: [
+            { title: "Calibration", controls: [
+                { id: "calibrateInput", label: "Calibration" },
+                { id: "inputCalibrationLevel", label: "Calibration level" }
             ] },
             { title: "Oversampling", controls: [
                 { id: "osEnabled", label: "Enabled" },
-                { id: "osFactor", label: "Factor" }
+                { id: "osFactor", label: "Rate" }
             ] }
         ]
     }

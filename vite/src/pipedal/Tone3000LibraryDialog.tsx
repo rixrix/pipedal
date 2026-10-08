@@ -16,11 +16,17 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import DialogEx from "./DialogEx";
+import Tone3000PresetPreviewDialog from "./Tone3000PresetPreviewDialog";
+import Tone3000PerformanceDialog from "./Tone3000PerformanceDialog";
+import Tone3000BundleDialog from "./Tone3000BundleDialog";
 import { PiPedalModelFactory, State } from "./PiPedalModel";
-import type { Tone3000Import, Tone3000LibraryEntry, Tone3000LibraryResult } from "./Tone3000Library";
+import type { Tone3000Import, Tone3000LibraryEntry, Tone3000LibraryResult, Tone3000PreviewSelection } from "./Tone3000Library";
 
 /** Discover and explicitly apply complete rigs without operator file copying.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.10]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-CONTROL-SCOPE] [7.18]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-STABILITY-REVIEW] [7.22]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-PLAIN-TOOLS] [7.25]
  */
 export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     const model = PiPedalModelFactory.getInstance();
@@ -30,6 +36,9 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
     const [search, setSearch] = useState("");
+    const [preview, setPreview] = useState<Tone3000PreviewSelection | null>(null);
+    const [performanceOpen, setPerformanceOpen] = useState(false);
+    const [bundleOpen, setBundleOpen] = useState(false);
     const [pendingLoad, setPendingLoad] = useState<Tone3000Import | null>(null);
     const [connected, setConnected] = useState(model.state.get() === State.Ready);
     const [recoveryNotice, setRecoveryNotice] = useState("");
@@ -57,7 +66,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
 
     useEffect(() => {
         alive.current = open;
-        setBusy(false); setRefreshing(false);
+        setBusy(false); setRefreshing(false); setPreview(null); setPerformanceOpen(false); setBundleOpen(false);
         if (!open) return;
         /** Invalidate old work; reconciliation is read-only and never replays it.
          * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
@@ -69,13 +78,18 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                 ++generation.current;
                 if (working.current) setRecoveryNotice("Connection interrupted. The operation may have completed; verify the refreshed library before retrying.");
                 working.current = false;
-                setBusy(false); setRefreshing(false); setPendingLoad(null);
+                setBusy(false); setRefreshing(false); setPendingLoad(null); setPreview(null);
             } else void refresh();
         };
         // ObservableProperty immediately calls new listeners with current state.
         model.state.addOnChangedHandler(connectionChanged);
         const poll = window.setInterval(() => { void refresh(); }, 15000);
         return () => {
+            if (working.current) {
+                const message = "The operation may have completed. Inspect the refreshed library before retrying.";
+                setRecoveryNotice(message);
+                model.showAlert(message); // Retain uncertainty even if the parent unmounts this dialog.
+            }
             alive.current = false;
             ++generation.current;
             working.current = false;
@@ -119,7 +133,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
 
     const add = (entry: Tone3000LibraryEntry, asNew = false) => run(async () => {
         await model.importTone3000Preset(entry, undefined, asNew);
-        return entry.name + " added to TONE3000 Library. Select Load to play it.";
+        return entry.name + " saved in PiPedal. Select Load to play it.";
     });
     const update = (entry: Tone3000LibraryEntry, target: Tone3000Import) => run(async () => {
         await model.importTone3000Preset(entry, target);
@@ -147,20 +161,24 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
         return count + (count === 1 ? " rig uploaded. Select Add to save it in PiPedal." : " rigs uploaded. Select Add to save them in PiPedal.");
     });
     const entries = library.entries.filter(entry =>
-        (entry.name + " " + entry.source).toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+        [entry.name, entry.source, ...entry.imports.map(target => target.name)].join(" ").toLocaleLowerCase().includes(search.toLocaleLowerCase()));
 
     return <>
         <DialogEx tag="tone3000Library" open={open} fullWidth maxWidth="md"
+            sx={{ "& .MuiDialog-paper": { m: { xs: 0, sm: 4 }, width: { xs: "100%", sm: "calc(100% - 64px)" },
+                maxWidth: { xs: "100%", sm: 900 }, height: { xs: "100%", sm: "auto" },
+                maxHeight: { xs: "100%", sm: "calc(100% - 64px)" }, borderRadius: { xs: 0, sm: 1 } },
+                "& .MuiButton-root": { minHeight: 44, whiteSpace: "normal" } }}
             onClose={() => { if (!working.current) onClose(); }}>
-            <DialogTitle>TONE3000 Library</DialogTitle>
-            <DialogContent dividers onDragOver={event => { event.preventDefault(); }}
+            <DialogTitle sx={{ px: { xs: 1.5, sm: 3 } }}>TONE3000 Library</DialogTitle>
+            <DialogContent dividers sx={{ p: { xs: 1.5, sm: 3 } }} onDragOver={event => { event.preventDefault(); }}
                 onDrop={event => {
                     event.preventDefault();
                     if (!working.current && event.dataTransfer.files.length) void upload(Array.from(event.dataTransfer.files));
                 }}>
                 <Stack spacing={2}>
                     <Typography variant="body2" color="text.secondary">
-                        Rigs saved in the Pi's TONE3000 app appear here automatically. Add saves a PiPedal rig; Load plays it.
+                        Presets saved in TONE3000 on this Pi appear here automatically. Choose a source, then Add to save a copy in PiPedal. Load plays a saved copy. Update replaces that copy with its source.
                     </Typography>
                     <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}>
                         <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => { void refresh(true); }}>Refresh</Button>
@@ -184,28 +202,32 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                     {!entries.length && !refreshing && <Typography color="text.secondary">
                         {library.entries.length ? "No matching rigs." : "No rigs found. Save a preset in TONE3000 or upload a .t3kpreset file."}
                     </Typography>}
-                    {entries.map(entry => <Paper variant="outlined" key={entry.key} sx={{ p: 2 }}>
+                    {entries.map(entry => <Paper variant="outlined" key={entry.key} sx={{ p: { xs: 1.5, sm: 2 }, minWidth: 0 }}>
                         <Stack spacing={1}>
-                            <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
-                                <Box sx={{ minWidth: 0 }}>
-                                    <Typography variant="subtitle1" sx={{ overflowWrap: "anywhere" }}>{entry.name}</Typography>
-                                    <Typography variant="caption" color="text.secondary">{entry.source}</Typography>
-                                </Box>
-                                <Stack direction="row" spacing={1}>
-                                    <Chip size="small" label={!entry.imports.length ? "New" : entry.imports.some(target => target.sha256 !== entry.sha256) ? "Update available" : "Added"}
-                                        color={entry.imports.some(target => target.sha256 !== entry.sha256) ? "warning" : "default"} />
-                                    <Button disabled={busy || refreshing || !connected} onClick={() => { void add(entry, entry.imports.length > 0); }}>
-                                        {entry.imports.length ? "Add as new" : "Add"}
-                                    </Button>
-                                </Stack>
+                            <Box sx={{ minWidth: 0 }}>
+                                <Typography variant="subtitle1" sx={{ overflowWrap: "anywhere" }}>{entry.name}</Typography>
+                                <Typography variant="caption" component="p" color="text.secondary">TONE3000 source · {entry.source}</Typography>
+                            </Box>
+                            <Chip size="small" sx={{ alignSelf: "flex-start", maxWidth: "100%", height: "auto", py: .5,
+                                "& .MuiChip-label": { whiteSpace: "normal" } }}
+                                label={!entry.imports.length ? "Not saved in PiPedal" : entry.imports.some(target => target.sha256 !== entry.sha256) ? "Update available" : "Saved in PiPedal"}
+                                color={entry.imports.some(target => target.sha256 !== entry.sha256) ? "warning" : "default"} />
+                            <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
+                                <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, action: "preview" })}>Preview source</Button>
+                                <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, action: entry.imports.length ? "addNew" : "add" })}>
+                                    {entry.imports.length ? "Add another copy" : "Add to PiPedal"}
+                                </Button>
                             </Stack>
+                            {entry.imports.length > 0 && <Typography variant="subtitle2">Saved PiPedal {entry.imports.length === 1 ? "copy" : "copies"}</Typography>}
                             {entry.imports.map(target => <Box key={target.bankId + "/" + target.presetId + "/" + target.instanceId}
                                 sx={{ borderTop: 1, borderColor: "divider", pt: 1 }}>
-                                <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
-                                    <Typography variant="body2">{target.name}{target.active ? " · Current rig" : ""}</Typography>
-                                    <Stack direction="row" spacing={1}>
+                                <Stack spacing={.5}>
+                                    <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>{target.name}{target.active ? " · Current rig" : ""}</Typography>
+                                    {target.sha256 !== entry.sha256 && <Typography variant="caption" color="warning.main">Source changed. Update replaces this saved copy.</Typography>}
+                                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
+                                        <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, target, action: "preview" })}>Compare with source</Button>
                                         {target.sha256 !== entry.sha256 && <Button disabled={busy || refreshing || !connected}
-                                            onClick={() => { void update(entry, target); }}>{target.active ? "Update & load" : "Update"}</Button>}
+                                            onClick={() => setPreview({ entry, target, action: "update" })}>{target.active ? "Update & load" : "Update"}</Button>}
                                         <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => load(target)}>Load</Button>
                                     </Stack>
                                 </Stack>
@@ -217,8 +239,24 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                     </Paper>)}
                 </Stack>
             </DialogContent>
-            <DialogActions><Button disabled={busy} onClick={onClose}>Close</Button></DialogActions>
+            <DialogActions sx={{ px: { xs: 1.5, sm: 3 }, alignItems: "flex-start", gap: 1 }}>
+                <Box component="details" sx={{ flex: 1, minWidth: 0 }}>
+                    <Box component="summary" sx={{ minHeight: 44, cursor: "pointer", py: 1, boxSizing: "border-box" }}>More tools</Box>
+                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
+                        <Button disabled={busy || !connected} onClick={() => setBundleOpen(true)}>Check rig bundle</Button>
+                        <Button disabled={busy || !connected} onClick={() => setPerformanceOpen(true)}>Four-switch setup</Button>
+                    </Stack>
+                </Box>
+                <Button disabled={busy} onClick={() => { if (!working.current) onClose(); }}>Close</Button>
+            </DialogActions>
         </DialogEx>
+        <Tone3000PerformanceDialog open={open && performanceOpen} onClose={() => setPerformanceOpen(false)} />
+        <Tone3000BundleDialog open={open && bundleOpen} onClose={() => setBundleOpen(false)} />
+        <Tone3000PresetPreviewDialog selection={open ? preview : null} onClose={() => setPreview(null)} onConfirm={selection => {
+            setPreview(null);
+            if (selection.action === "update" && selection.target) void update(selection.entry, selection.target);
+            else if (selection.action === "add" || selection.action === "addNew") void add(selection.entry, selection.action === "addNew");
+        }} />
         <DialogEx tag="tone3000LibraryUnsaved" open={pendingLoad !== null} onClose={() => setPendingLoad(null)}>
             <DialogTitle>Load this rig?</DialogTitle>
             <DialogContent><DialogContentText>Your current rig has unsaved changes. Loading replaces those changes.</DialogContentText></DialogContent>

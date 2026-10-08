@@ -17,6 +17,7 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import { tone3000ViewportStyles } from "./Tone3000MobileLayout";
 import { SyntheticEvent } from 'react';
 import { Theme } from '@mui/material/styles';
 import WithStyles, { withTheme } from './WithStyles';
@@ -33,6 +34,8 @@ import {
 } from './Pedalboard';
 import InputIcon from '@mui/icons-material/Input';
 import LoadPluginDialog from './LoadPluginDialog';
+import Tone3000LibraryDialog from './Tone3000LibraryDialog';
+import LibraryBooksOutlinedIcon from '@mui/icons-material/LibraryBooksOutlined';
 import Switch from '@mui/material/Switch';
 import Typography from '@mui/material/Typography';
 
@@ -124,6 +127,7 @@ interface MainState {
     selectedPedal: number;
     selectedSnapshot: number;
     loadDialogOpen: boolean;
+    tone3000LibraryOpen: boolean;
     snapshotDialogOpen: boolean;
     pedalboard: Pedalboard;
     addMenuAnchorEl: HTMLElement | null;
@@ -173,6 +177,7 @@ export const MainPage =
                         selectedPedal: selectedPedal,
                         selectedSnapshot: -1,
                         loadDialogOpen: false,
+                        tone3000LibraryOpen: false,
                         snapshotDialogOpen: false,
                         displayNameDialogOpen: false,
                         pedalboard: pedalboard,
@@ -301,6 +306,12 @@ export const MainPage =
                 }
 
                 componentDidUpdate(prevProps: MainProps, prevState: MainState) {
+                    // Close selection-owned UI; the dialog unmounts away from T3K.
+                    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY-TOOLBAR] [7.19]
+                    if (this.state.tone3000LibraryOpen && (prevState.selectedPedal !== this.state.selectedPedal
+                        || this.getSelectedPedalboardItem()?.uri !== "https://www.tone3000.com/plugin")) {
+                        this.setState({ tone3000LibraryOpen: false });
+                    }
                     if (prevState.selectedPedal !== this.state.selectedPedal
                         || prevState.pedalboard !== this.state.pedalboard
                     ) {
@@ -658,11 +669,16 @@ export const MainPage =
                         }
                     }
                     let horizontalScrollLayout = this.state.horizontalScrollLayout;
+                    // A tabbed T3K editor needs the remaining height on folded/landscape phones.
+                    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [7.14]
+                    const tone3000Panel = pluginUri === "https://www.tone3000.com/plugin";
+                    const t3kViewport = tone3000ViewportStyles(this.state.screenHeight, horizontalScrollLayout);
 
                     return (
                         <div className={classes.frame}>
                             <div id="pedalboardScroll" className={horizontalScrollLayout ? classes.pedalboardScrollSmall : classes.pedalboardScroll}
-                                style={{ maxHeight: horizontalScrollLayout ? undefined : this.state.screenHeight / 2 }}>
+                                style={tone3000Panel ? t3kViewport.chain
+                                    : { maxHeight: horizontalScrollLayout ? undefined : this.state.screenHeight / 2 }}>
                                 <PedalboardView key={pluginUri} selectedId={this.state.selectedPedal}
                                     enableStructureEditing={this.props.enableStructureEditing}
                                     onSelectionChanged={this.onSelectionChanged}
@@ -674,7 +690,8 @@ export const MainPage =
                             <div className={classes.controlToolBar}>
                                 <div style={{
                                     display: "flex", flexFlow: "row nowrap", alignItems: "center", justifyContent: "center", minWidth: 0,
-                                    width: "100%", height: 48, paddingLeft: 16, paddingRight: 16
+                                    width: "100%", height: 48, paddingLeft: 16, paddingRight: 16,
+                                    ...(tone3000Panel ? { paddingLeft: 4, paddingRight: 4, boxSizing: "border-box" as const } : {})
                                 }} >
                                     <div style={{ flex: "0 0 auto", width: this.state.splitControlBar ? undefined : 60 }} >
                                         <div style={{ display: bypassVisible ? "block" : "none", width: this.state.splitControlBar ? undefined : 60 }} >
@@ -691,8 +708,21 @@ export const MainPage =
                                     <div style={{ flex: "1 1 1px" }}>
 
                                     </div>
+                                    {/* @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY-TOOLBAR] [7.19] */}
+                                    {tone3000Panel && <div style={{ flex: "0 0 auto" }}>
+                                        {this.windowSize.width < SPLIT_CONTROLBAR_THRESHHOLD
+                                            ? <IconButtonEx tooltip="TONE3000 Library" aria-label="Open TONE3000 Library"
+                                                style={{ width: 44, height: 44 }}
+                                                onClick={() => this.setState({ tone3000LibraryOpen: true })}>
+                                                <LibraryBooksOutlinedIcon />
+                                            </IconButtonEx>
+                                            : <ButtonEx tooltip="TONE3000 Library" aria-label="Open TONE3000 Library" color="inherit"
+                                                startIcon={<LibraryBooksOutlinedIcon />} style={{ minHeight: 44, textTransform: "none" }}
+                                                onClick={() => this.setState({ tone3000LibraryOpen: true })}>Library</ButtonEx>}
+                                    </div>}
                                     {this.props.enableStructureEditing && (
-                                        <div style={{ flex: "0 0 auto", display: "flex", flexFlow: "row nowrap", alignItems: "center" }}>
+                                        <div style={{ flex: tone3000Panel ? "0 1 auto" : "0 0 auto", display: "flex", flexFlow: "row nowrap", alignItems: "center",
+                                            ...(tone3000Panel ? { minWidth: 0, overflowX: "auto" as const, overflowY: "hidden" as const } : {}) }}>
                                             <div style={{ flex: "0 0 auto" }}>
                                                 <PluginPresetSelector pedalboardItem={pedalboardItem} instanceId={pedalboardItem?.instanceId ?? 0}
                                                 />
@@ -768,7 +798,8 @@ export const MainPage =
                                     </div>
                                 )
                             }
-                            <div id="mainPageControls" className={horizontalScrollLayout ? classes.controlContentSmall : classes.controlContent}>
+                            <div id="mainPageControls" className={horizontalScrollLayout ? classes.controlContentSmall : classes.controlContent}
+                                style={tone3000Panel ? t3kViewport.controls : undefined}>
                                 {
                                     missing ? (
                                         <div style={{ marginLeft: 40, marginTop: 20 }}>
@@ -787,6 +818,8 @@ export const MainPage =
                                         )
                                 }
                             </div>
+                            {tone3000Panel && <Tone3000LibraryDialog key={instanceId} open={this.state.tone3000LibraryOpen}
+                                onClose={() => this.setState({ tone3000LibraryOpen: false })} />}
                             <MidiBindingsDialog open={this.state.showMidiBindingsDialog}
                                 onClose={() => this.setState({ showMidiBindingsDialog: false })}
                             />

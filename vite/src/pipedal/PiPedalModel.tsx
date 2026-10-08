@@ -29,8 +29,11 @@ import ScreenOrientation from './ScreenOrientation';
 import PiPedalSocket, { PiPedalMessageHeader } from './PiPedalSocket';
 import { Tone3000DownloadHandler } from './Tone3000Downloader';
 import Tone3000DownloadType from './Tone3000DownloadType';
-import type { Tone3000Import, Tone3000ImportResult, Tone3000LibraryEntry, Tone3000LibraryResult } from './Tone3000Library';
+import type { Tone3000Import, Tone3000ImportResult, Tone3000LibraryEntry, Tone3000LibraryResult, Tone3000PreviewResult } from './Tone3000Library';
 import type { Tone3000CurrentState, Tone3000Defaults, Tone3000DefaultsResult, Tone3000StatePatch } from './Tone3000Rig';
+import type { Tone3000PerformanceSource, Tone3000PerformanceResult } from './Tone3000Performance';
+import type { Tone3000StageCommand, Tone3000StageResult } from './Tone3000Stage';
+import { Tone3000MeasurementSession } from './Tone3000Stage';
 import { nullCast } from './Utility'
 import { JackConfiguration, JackChannelSelection } from './Jack';
 import { BankIndex } from './Banks';
@@ -303,12 +306,14 @@ export class MidiMessage {
 };
 
 class MidiEventListener {
-    constructor(handle: number, callback: (message: MidiMessage) => void) {
+    constructor(handle: number, callback: (message: MidiMessage) => void, programOnly = false) {
         this.handle = handle;
         this.callback = callback;
+        this.programOnly = programOnly;
     }
     handle: number;
     callback: (midiMessage: MidiMessage) => void;
+    programOnly: boolean;
 };
 
 export type PatchPropertyListener = (instanceId: number, propertyUri: string, atomObject: any) => void;
@@ -2947,6 +2952,21 @@ export class PiPedalModel //implements PiPedalModel
 
     }
 
+    /** Opt-in passive PC observation; ordinary MIDI Learn remains notes/CC.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4]
+     */
+    async listenForMidiProgramEvent(onReceived: (message: MidiMessage) => void): Promise<ListenHandle> {
+        const handle = this.nextListenHandle++;
+        this.midiListeners.push(new MidiEventListener(handle, onReceived, true));
+        try {
+            await nullCast(this.webSocket).request<boolean>("listenForMidiProgramEvent", { handle });
+            return { _handle: handle };
+        } catch (error) {
+            this.cancelListenForMidiEvent({ _handle: handle });
+            throw error;
+        }
+    }
+
     monitorPatchProperty(
         instanceId: number,
         propertyUri: string,
@@ -3006,12 +3026,14 @@ export class PiPedalModel //implements PiPedalModel
     handleNotifyMidiListener(clientHandle: number, cc0: number, cc1: number, cc2: number): void {
         let midiMessage = new MidiMessage(cc0, cc1, cc2);
 
-        if (!midiMessage.isNote() && !midiMessage.isControl()) {
+        const isProgram = (cc0 & 0xf0) === 0xc0 && cc1 >= 0 && cc1 < 128;
+        if (!midiMessage.isNote() && !midiMessage.isControl() && !isProgram) {
             return;
         }
         for (let i = 0; i < this.midiListeners.length; ++i) {
             let listener = this.midiListeners[i];
             if (listener.handle === clientHandle) {
+                if (listener.programOnly !== isProgram) continue;
                 listener.callback(midiMessage);
             }
         }
@@ -3908,6 +3930,53 @@ export class PiPedalModel //implements PiPedalModel
      */
     getTone3000Library(): Promise<Tone3000LibraryResult> {
         return nullCast(this.webSocket).request<Tone3000LibraryResult>("getTone3000Library");
+    }
+    /** Saved revisions and ordered copies; creation never loads.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4]
+     */
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5] [7.6] */
+    private tone3000MeasurementSession = new Tone3000MeasurementSession();
+    private tone3000MeasurementListener = false;
+    getTone3000MeasurementSession(): Tone3000MeasurementSession {
+        if (!this.tone3000MeasurementListener) {
+            this.tone3000MeasurementListener = true;
+            this.state.addOnChangedHandler(state => { if (state !== State.Ready) this.tone3000MeasurementSession.clear(); });
+        }
+        return this.tone3000MeasurementSession;
+    }
+    startTone3000Stage(instanceId: number, expectedRevision: string, command: Tone3000StageCommand, payload?: object): Promise<Tone3000StageResult> {
+        return nullCast(this.webSocket).request<Tone3000StageResult>("startTone3000Stage", { instanceId, expectedRevision, command, ...(payload ? { payload } : {}) });
+    }
+    pollTone3000Stage(instanceId: number, token: number): Promise<Tone3000StageResult> {
+        return nullCast(this.webSocket).request<Tone3000StageResult>("pollTone3000Stage", { instanceId, token });
+    }
+    cancelTone3000Stage(instanceId: number, token: number): Promise<Tone3000StageResult> {
+        return nullCast(this.webSocket).request<Tone3000StageResult>("cancelTone3000Stage", { instanceId, token });
+    }
+    applyTone3000Level(token: number, expectedRevision: string, targetRmsDb: number): Promise<{ applied: boolean; trimDb: number; outputLevel: number }> {
+        return nullCast(this.webSocket).request("applyTone3000Level", { token, expectedRevision, targetRmsDb });
+    }
+    async getTone3000PerformanceSources(): Promise<Tone3000PerformanceSource[]> {
+        return (await nullCast(this.webSocket).request<{ sources: Tone3000PerformanceSource[] }>("getTone3000PerformanceSources")).sources;
+    }
+    createTone3000PerformanceBank(name: string, slots: Tone3000PerformanceSource[]): Promise<Tone3000PerformanceResult> {
+        return nullCast(this.webSocket).request<Tone3000PerformanceResult>("createTone3000PerformanceBank", {
+            name, slots: slots.map(slot => ({ bankId: slot.bankId, presetId: slot.presetId, expectedRevision: slot.revision }))
+        });
+    }
+    getTone3000PerformanceBank(bankId: number): Promise<Tone3000PerformanceResult> {
+        return nullCast(this.webSocket).request<Tone3000PerformanceResult>("getTone3000PerformanceBank", { bankId });
+    }
+
+    /** Read a source and optional saved target; never captures the playing effect.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [7.1]
+     */
+    getTone3000PresetPreview(entry: Tone3000LibraryEntry, target?: Tone3000Import): Promise<Tone3000PreviewResult> {
+        return nullCast(this.webSocket).request<Tone3000PreviewResult>("getTone3000PresetPreview", {
+            key: entry.key, sha256: entry.sha256,
+            bankId: target?.bankId ?? -1, presetId: target?.presetId ?? -1,
+            instanceId: target?.instanceId ?? -1, expectedImportSha256: target?.sha256 ?? ""
+        });
     }
 
     /** Add or explicitly update an identified saved rig, with source guards.

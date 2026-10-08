@@ -33,7 +33,7 @@ function fixture(kind, section = "Blocks") {
     };
     const { ObservableProperty } = runModule(observableCode);
     Object.assign(context, runModule(rigCode));
-    for (const name of ["Busy", "Refreshing", "Connected", "PendingLoad", "RecoveryNotice", "Notice", "Error", "Library",
+    for (const name of ["Busy", "Refreshing", "Connected", "PendingLoad", "Preview", "PerformanceOpen", "BundleOpen", "RecoveryNotice", "Notice", "Error", "Library",
         "Rig", "Draft", "Follow", "Defaults", "ProfileId", "ProfileDraft", "Status", "Stale", "Waiting"]) {
         const key = name[0].toLowerCase() + name.slice(1);
         context["set" + name] = value => {
@@ -51,10 +51,11 @@ function fixture(kind, section = "Blocks") {
             branchSide: "left", branchAfterBlockId: "", blocks: [block] } };
     const profile = { revision: "profile-original", activeProfile: "live", defaults: { multiCore: false,
         namSlimSizeDefault: 1, calibrateInput: false, inputCalibrationLevel: 0, osEnabled: false, osFactor: 0 }, profiles: [] };
-    const reads = [], writes = [], uploads = [];
+    const reads = [], writes = [], uploads = [], alerts = [];
     let currentValue = current, libraryValue = { entries: [], warnings: [] }, profileValue = profile;
     const model = context.model = {
         state: new ObservableProperty(context.State.Ready),
+        showAlert: message => alerts.push(message),
         getTone3000CurrentState: async () => { reads.push("current"); return currentValue; },
         getTone3000Library: async () => { reads.push("library"); return libraryValue; },
         getTone3000Defaults: async () => { reads.push("defaults"); return profileValue; },
@@ -86,7 +87,7 @@ function fixture(kind, section = "Blocks") {
     install("mount", effects.find(effect => effect.getText(source).includes("const connectionChanged")));
     if (kind === "rig") install("mountDisposal", effects.find(effect => effect.getText(source).includes("() => { ++operationGeneration.current")));
     let cleanup = context.mount(), dispose = context.mountDisposal?.();
-    return { context, model, reads, writes, uploads, current, profile,
+    return { context, model, reads, writes, uploads, alerts, current, profile,
         setCurrent: value => { currentValue = value; }, setLibrary: value => { libraryValue = value; },
         lose: () => model.state.set(context.State.Reconnecting), ready: () => model.state.set(context.State.Ready),
         reopen: () => { cleanup?.(); context.open = false; context.mount(); context.open = true; cleanup = context.mount(); },
@@ -108,7 +109,7 @@ test("Library interruption reconciles metadata, retains uncertain outcome and ig
     assert.equal(f.context.busy, true, "old completion cannot release a newer operation");
     assert.equal(f.context.notice, "");
     f.writes[1].pending.resolve({ presetId: 4 }); await next;
-    assert.equal(f.context.busy, false); assert.match(f.context.notice, /added/);
+    assert.equal(f.context.busy, false); assert.match(f.context.notice, /saved in PiPedal/);
     assert.match(f.context.recoveryNotice, /may have completed/);
     f.cleanup(); assert.equal(f.model.state._on_changed_handlers.length, 0);
 });
@@ -130,6 +131,8 @@ test("externally closing/reopening Library clears obsolete busy guards and ignor
     f.reopen(); await flush();
     assert.equal(f.context.busy, false); assert.equal(f.context.refreshing, false);
     assert.equal(f.context.working.current, false); assert.equal(f.writes.length, 1);
+    assert.match(f.context.recoveryNotice, /may have completed/);
+    assert.equal(f.alerts.length, 1, "forced closure retains uncertainty outside the destroyed dialog");
     f.writes[0].pending.resolve({}); await operation;
     assert.equal(f.context.notice, ""); assert.equal(f.context.busy, false);
     assert.equal(f.model.state._on_changed_handlers.length, 1); f.cleanup();
