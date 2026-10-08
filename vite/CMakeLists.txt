@@ -241,6 +241,7 @@ add_custom_command(
     src/pipedal/Tone3000TouchEditor.tsx
     src/pipedal/Tone3000TouchMath.ts
     src/pipedal/Tone3000TouchSettings.ts
+    src/pipedal/Tone3000EditState.ts
     # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.10]
     src/pipedal/Tone3000Library.ts
     src/pipedal/Tone3000LibraryDialog.tsx

@@ -29,6 +29,7 @@ import type { Tone3000Block, Tone3000CurrentState, Tone3000Defaults, Tone3000Def
 
 import { tone3000GearLabel } from "./Tone3000Gear";
 import { tone3000DraftNumber, tone3000FormatNumber, tone3000SameDraftNumber } from "./Tone3000MobileLayout";
+import { tone3000RigDraftChanged, tone3000ProfileDraftChanged, tone3000EditDrafts } from "./Tone3000EditState";
 
 const rowStyle = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 };
 
@@ -307,6 +308,9 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     const [profileDraft, setProfileDraft] = useState<Tone3000Defaults | null>(null);
     const [status, setStatus] = useState<JackHostStatus | null>(null);
     const [busy, setBusy] = useState(false);
+    const [busyLabel, setBusyLabel] = useState("Applying changes");
+    const [captureReady, setCaptureReady] = useState(false);
+    const presets = useHostValue(model.presets);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
     const [stale, setStale] = useState(false);
@@ -341,15 +345,57 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     const profileDirty = useRef(false);
     const rigRef = useRef(rig);
     rigRef.current = rig;
+    const draftRef = useRef(draft); draftRef.current = draft;
+    const followRef = useRef(follow); followRef.current = follow;
+    const defaultsRef = useRef(defaults); defaultsRef.current = defaults;
+    const profileDraftRef = useRef(profileDraft); profileDraftRef.current = profileDraft;
+    const profileIdRef = useRef(profileId); profileIdRef.current = profileId;
+    const staleRef = useRef(stale); staleRef.current = stale;
+    const activeRef = useRef(active); activeRef.current = active;
+    const captureReadyRef = useRef(false);
+    const captureOwner = useRef<{ key: string; epoch: number } | null>(null);
+    const registry = tone3000EditDrafts(model);
+    const draftToken = useRef(Symbol("T3K panel draft"));
+    const [pendingSections, setPendingSections] = useState<string[]>([]);
+    const saveCancellation = useRef<(() => void) | null>(null);
+    const ownerKey = useCallback(() => JSON.stringify([instanceId, model.banks.get().selectedBank,
+        model.presets.get().selectedInstanceId, model.selectedSnapshot.get()]), [instanceId, model]);
+    const ownership = useRef({ key: ownerKey(), epoch: 0 });
+    const renderedOwner = { key: ownerKey(), epoch: ownership.current.epoch };
+    const publishDraft = useCallback(() => registry.set(draftToken.current, ownerKey(), section,
+        rigDirty.current || profileDirty.current), [registry, ownerKey, section]);
+    /** Selection identity and an observed generation prevent A→B→A resurrection.
+     * The generic Save transport retains its existing server receipt semantics.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOUR-REFINEMENTS] [7.29] */
+    const ownerCurrent = useCallback((key: string, epoch: number) => alive.current && model.state.get() === State.Ready
+        && ownership.current.key === key && ownerKey() === key && ownership.current.epoch === epoch
+        && model.pedalboard.get().tryGetItem(instanceId)?.uri === "https://www.tone3000.com/plugin", [model, instanceId, ownerKey]);
+    const invalidateCapture = useCallback(() => {
+        ++ownership.current.epoch; ++generation.current; ++operationGeneration.current;
+        captureReadyRef.current = false; captureOwner.current = null; setCaptureReady(false);
+        saveCancellation.current?.();
+        if (working.current) setRecoveryNotice("The rig or connection changed. The operation may have completed; check the current preset before retrying.");
+        working.current = false; setBusy(false); setWaiting(false);
+    }, []);
 
     const acceptRig = useCallback((value: Tone3000CurrentState) => {
+        rigRef.current = value; draftRef.current = value.summary; followRef.current = value.followDefaults;
         setRig(value); setDraft(value.summary); setFollow(value.followDefaults);
         rigDirty.current = false; setStale(false); setWaiting(false);
-    }, []);
+        staleRef.current = false; waitingRef.current = false;
+        publishDraft();
+    }, [publishDraft]);
     const acceptDefaults = useCallback((value: Tone3000DefaultsResult) => {
+        defaultsRef.current = value; profileIdRef.current = value.activeProfile; profileDraftRef.current = value.defaults;
         setDefaults(value); setProfileId(value.activeProfile); setProfileDraft(value.defaults);
         profileDirty.current = false;
-    }, []);
+        publishDraft();
+    }, [publishDraft]);
+    useEffect(() => {
+        const unsubscribe = registry.subscribe(() => setPendingSections(registry.sections(ownerKey())));
+        publishDraft();
+        return () => { unsubscribe(); registry.remove(draftToken.current); };
+    }, [registry, ownerKey, publishDraft]);
     useEffect(() => {
         ++operationGeneration.current;
         working.current = false; setBusy(false);
@@ -359,30 +405,67 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     const refresh = useCallback(async (reset = false) => {
         if (!alive.current || working.current || model.state.get() !== State.Ready) return;
         const request = ++generation.current;
+        const key = ownerKey(), epoch = ownership.current.epoch;
+        const current = () => request === generation.current && ownerCurrent(key, epoch);
         try {
             const value = await model.getTone3000CurrentState(instanceId);
-            if (!alive.current || request !== generation.current) return;
-            if (reset || !rigDirty.current) {
+            if (!current()) return;
+            captureReadyRef.current = true; captureOwner.current = { key, epoch }; setCaptureReady(true);
+            if (reset || !rigDirty.current || !tone3000RigDraftChanged(value, draftRef.current, followRef.current)) {
                 if (waitingRef.current) setNotice("Changes applied to this rig. Use PiPedal Save to keep them.");
                 acceptRig(value);
             }
-            else setStale(value.revision !== rigRef.current?.revision);
+            else { staleRef.current = value.revision !== rigRef.current?.revision; setStale(staleRef.current); }
             if (section === "Settings") {
                 const [profiles, currentStatus] = await Promise.all([model.getTone3000Defaults(), model.getJackStatus()]);
-                if (!alive.current || request !== generation.current) return;
+                if (!current()) return;
                 if (reset || !profileDirty.current) acceptDefaults(profiles);
                 setStatus(currentStatus);
             }
             if (reset) setError("");
         } catch (failure) {
-            if (alive.current && request === generation.current) {
+            if (current()) {
+                captureReadyRef.current = false; captureOwner.current = null; setCaptureReady(false);
                 if (String(failure).includes("Apply accepted;")) {
                     setWaiting(true);
                     setNotice("Changes accepted. Waiting for captured settings before Save; this is not an audio-readiness check.");
                 } else setError(String(failure));
             }
         }
-    }, [model, instanceId, section, acceptRig, acceptDefaults]);
+    }, [model, instanceId, section, acceptRig, acceptDefaults, ownerKey, ownerCurrent]);
+    /** Same-owner replacements reconcile read-only; new selections discard old drafts.
+     * Every invalidation occurs synchronously before stale callbacks can dispatch.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOUR-REFINEMENTS] [7.29] */
+    useEffect(() => {
+        const changed = () => {
+            const next = ownerKey();
+            if (next === ownership.current.key) {
+                if (!model.presets.get().presetChanged) setNotice(message =>
+                    message.startsWith("Changes applied") || message.startsWith("Changes accepted") ? "" : message);
+                return;
+            }
+            invalidateCapture(); ownership.current.key = next;
+            registry.remove(draftToken.current);
+            rigRef.current = null; draftRef.current = null; rigDirty.current = false;
+            setRig(null); setDraft(null); setStale(false); staleRef.current = false; setNotice(""); setError("");
+            publishDraft();
+            if (activeRef.current) void refresh();
+        };
+        model.banks.addOnChangedHandler(changed); model.presets.addOnChangedHandler(changed);
+        model.selectedSnapshot.addOnChangedHandler(changed);
+        let initial = true;
+        const boardChanged = () => {
+            if (initial) { initial = false; return; }
+            if (ownerKey() !== ownership.current.key) { changed(); return; }
+            invalidateCapture();
+            if (activeRef.current) void refresh();
+        };
+        model.pedalboard.addOnChangedHandler(boardChanged);
+        return () => {
+            model.banks.removeOnChangedHandler(changed); model.presets.removeOnChangedHandler(changed);
+            model.selectedSnapshot.removeOnChangedHandler(changed); model.pedalboard.removeOnChangedHandler(boardChanged);
+        };
+    }, [model, ownerKey, refresh, invalidateCapture, registry, publishDraft]);
     useEffect(() => {
         alive.current = true;
         /** Preserve local drafts, release interrupted work, and reconcile only reads.
@@ -392,7 +475,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
             const ready = state === State.Ready;
             setConnected(ready);
             if (!ready) {
-                ++generation.current; ++operationGeneration.current;
+                invalidateCapture();
                 if (working.current) setRecoveryNotice("Connection interrupted. The operation may have completed; verify captured settings and saved defaults before retrying.");
                 working.current = false;
                 setBusy(false); setWaiting(false);
@@ -405,18 +488,20 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
             model.state.removeOnChangedHandler(connectionChanged);
             window.clearInterval(timer);
         };
-    }, [active, refresh, model]);
-    useEffect(() => () => { ++operationGeneration.current; working.current = false; }, []);
+    }, [active, refresh, model, invalidateCapture]);
+    useEffect(() => () => { ++operationGeneration.current; working.current = false; saveCancellation.current?.(); }, []);
 
     /** Interrupted generations cannot accept replies or release a newer action's guard.
      * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
      */
-    const run = async (action: (isCurrent: () => boolean) => Promise<string>) => {
-        if (working.current || !alive.current || model.state.get() !== State.Ready) return;
+    const run = async (action: (isCurrent: () => boolean) => Promise<string>, label = "Applying changes") => {
+        if (working.current || !activeRef.current || !ownerCurrent(renderedOwner.key, renderedOwner.epoch)) return;
+        const key = ownerKey(), epoch = ownership.current.epoch;
+        if (!ownerCurrent(key, epoch)) return;
         working.current = true; ++generation.current;
         const request = ++operationGeneration.current;
-        const isCurrent = () => alive.current && request === operationGeneration.current && model.state.get() === State.Ready;
-        setBusy(true); setError(""); setNotice("");
+        const isCurrent = () => request === operationGeneration.current && ownerCurrent(key, epoch);
+        setBusyLabel(label); setBusy(true); setError(""); setNotice("");
         try {
             const message = await action(isCurrent);
             if (isCurrent()) setNotice(message);
@@ -430,27 +515,45 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         }
     };
     const edit = (patch: Partial<Tone3000Summary>, processing = false) => {
-        rigDirty.current = true;
-        setDraft(value => value ? { ...value, ...patch } : value);
-        if (processing) setFollow(false);
+        if (working.current || !ownerCurrent(renderedOwner.key, renderedOwner.epoch) || !draftRef.current) return;
+        const value = { ...draftRef.current, ...patch };
+        const policy = processing ? false : followRef.current;
+        draftRef.current = value; followRef.current = policy;
+        rigDirty.current = tone3000RigDraftChanged(rigRef.current, value, policy);
+        publishDraft();
+        setDraft(value); setFollow(policy);
+    };
+    const changeFollow = (policy: boolean) => {
+        if (working.current || !ownerCurrent(renderedOwner.key, renderedOwner.epoch)) return;
+        followRef.current = policy; setFollow(policy);
+        rigDirty.current = tone3000RigDraftChanged(rigRef.current, draftRef.current, policy);
+        publishDraft();
+    };
+    const chooseProfile = (id: string, value: Tone3000Defaults) => {
+        if (working.current || !ownerCurrent(renderedOwner.key, renderedOwner.epoch)) return;
+        profileIdRef.current = id; profileDraftRef.current = value;
+        profileDirty.current = tone3000ProfileDraftChanged(defaultsRef.current, id, value);
+        publishDraft();
+        setProfileId(id); setProfileDraft(value);
     };
     const changeProfile = (patch: Partial<Tone3000Defaults>) => {
-        profileDirty.current = true;
-        setProfileDraft(value => value ? { ...value, ...patch } : value);
+        if (profileDraftRef.current) chooseProfile(profileIdRef.current, { ...profileDraftRef.current, ...patch });
     };
     const apply = (onlyDefaults = false) => run(async isCurrent => {
-        if (!rig || !draft) throw new Error("Refresh the current rig first.");
+        const baseline = rigRef.current, desired = draftRef.current;
+        if (!baseline || !desired) throw new Error("Refresh the current rig first.");
+        if (staleRef.current || waitingRef.current || !captureReadyRef.current) throw new Error("Refresh the current rig before applying changes.");
         const patch: Tone3000StatePatch = {};
-        if (!onlyDefaults && section === "Blocks") patch.blocks = tone3000BlockChanges(rig.summary.blocks, draft.blocks);
+        if (!onlyDefaults && section === "Blocks") patch.blocks = tone3000BlockChanges(baseline.summary.blocks, desired.blocks);
         if (!onlyDefaults && section === "Settings") {
             for (const field of ["inputMode", "calibrateInput", "inputCalibrationLevel", "osEnabled", "osFactor"] as const)
-                if (rig.summary[field] !== draft[field]) Object.assign(patch, { [field]: draft[field] });
+                if (baseline.summary[field] !== desired[field]) Object.assign(patch, { [field]: desired[field] });
         }
-        await model.setTone3000CurrentState(instanceId, rig.revision, patch,
-            section === "Settings" ? { followDefaults: onlyDefaults || follow, applyDefaults: onlyDefaults || follow } : {});
+        await model.setTone3000CurrentState(instanceId, baseline.revision, patch,
+            section === "Settings" ? { followDefaults: onlyDefaults || followRef.current, applyDefaults: onlyDefaults || followRef.current } : {});
         if (!isCurrent()) return "";
         rigDirty.current = false;
-        setWaiting(true);
+        waitingRef.current = true; setWaiting(true);
         try {
             const value = await model.getTone3000CurrentState(instanceId);
             if (isCurrent()) acceptRig(value);
@@ -462,12 +565,46 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         return "Changes applied to this rig. Use PiPedal Save to keep them.";
     });
     const saveDefaults = () => run(async isCurrent => {
-        if (!defaults || !profileDraft) throw new Error("Refresh the processing profiles first.");
-        const value = await model.setTone3000Defaults(defaults.revision, profileId, profileDraft);
+        if (!defaultsRef.current || !profileDraftRef.current) throw new Error("Refresh the processing profiles first.");
+        const value = await model.setTone3000Defaults(defaultsRef.current.revision, profileIdRef.current, profileDraftRef.current);
         if (isCurrent()) acceptDefaults(value);
         return "Device defaults saved. Playing audio is unchanged; apply them to this rig when ready.";
-    });
+    }, "Saving device defaults");
+    /** Existing Save is a notification, so observe its authoritative clean event
+     * before dispatch and never invent a successful acknowledgement or replay it.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOUR-REFINEMENTS] [7.29] */
+    const savePreset = () => run(async isCurrent => {
+        if (registry.sections(ownerKey()).length || rigDirty.current || profileDirty.current || staleRef.current || waitingRef.current || !captureReadyRef.current)
+            throw new Error("Apply or restore your drafts, then refresh before saving the preset.");
+        const value = await model.getTone3000CurrentState(instanceId);
+        if (!isCurrent()) return "";
+        if (registry.sections(ownerKey()).length || rigDirty.current || profileDirty.current || staleRef.current || waitingRef.current) return "";
+        acceptRig(value);
+        if (!model.presets.get().presetChanged) return "The current PiPedal preset is saved.";
+        await new Promise<void>((resolve, reject) => {
+            let dispatched = false, timer: ReturnType<typeof window.setTimeout> | undefined;
+            const finish = (error?: Error) => {
+                model.presets.removeOnChangedHandler(changed);
+                if (timer !== undefined) window.clearTimeout(timer);
+                if (saveCancellation.current === cancel) saveCancellation.current = null;
+                error ? reject(error) : resolve();
+            };
+            const cancel = () => finish(new Error("The rig or connection changed; preset Save is not confirmed."));
+            const changed = () => {
+                if (!isCurrent()) cancel();
+                else if (dispatched && !model.presets.get().presetChanged) finish();
+            };
+            saveCancellation.current = cancel;
+            model.presets.addOnChangedHandler(changed);
+            if (!isCurrent()) { cancel(); return; }
+            timer = window.setTimeout(() => finish(new Error("Preset Save has not been confirmed. Check the preset before retrying.")), 10000);
+            dispatched = true;
+            try { model.saveCurrentPreset(); } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
+        });
+        return "The whole current PiPedal preset is saved.";
+    }, "Saving preset");
     const validCalibration = (value: number) => Number.isFinite(value) && value >= -60 && value <= 60;
+    const capturedHere = captureReady && !!captureOwner.current && ownerCurrent(captureOwner.current.key, captureOwner.current.epoch);
 
     return <DraftTouchContext.Provider value={{ enabled: active && connected && !busy && !waiting && !stale,
         scopeKey: JSON.stringify([instanceId, section, rig?.revision, profileId, defaults?.revision]) }}>
@@ -478,17 +615,26 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
             sx={{ position: "sticky", top: 0, zIndex: 2, bgcolor: "background.paper",
                 borderBottom: 1, borderColor: "divider", p: 1, minWidth: 0 }}>
             <Stack spacing={.5}>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", rowGap: 1 }}>
                 <Button variant="contained" sx={{ alignSelf: "flex-start" }}
-                    disabled={busy || waiting || !connected || stale || !rigDirty.current
+                    disabled={busy || waiting || !connected || stale || !capturedHere || !rigDirty.current
                         || (section === "Blocks" ? !tone3000ValidBlocks(draft.blocks) : !validCalibration(draft.inputCalibrationLevel))}
                     onClick={() => { void apply(); }}>{section === "Blocks" ? "Apply block changes" : "Apply rig settings"}</Button>
+                <Button variant="outlined" disabled={busy || waiting || !connected || stale || !capturedHere
+                    || pendingSections.length > 0 || rigDirty.current || profileDirty.current || !presets.presetChanged}
+                    onClick={() => { void savePreset(); }}>Save preset</Button>
+                </Stack>
                 <Typography role="status" variant="body2" color="text.secondary">
                     {!connected ? "Reconnect to the Pi before applying changes."
-                        : busy ? "Applying your changes…"
+                        : busy ? busyLabel + "…"
                         : waiting ? "Checking your changes. Wait before saving."
                         : stale ? "This rig changed elsewhere. Refresh before applying."
-                        : rigDirty.current ? "Changes not applied yet. Tap Apply, then PiPedal Save to keep them."
-                        : notice || "Edit the settings below, then tap Apply. PiPedal Save keeps your changes."}
+                        : rigDirty.current ? "Unapplied edits. Tap Apply, or restore the starting values."
+                        : profileDirty.current ? "Device defaults have unapplied edits. Save or restore those defaults separately."
+                        : pendingSections.length ? "Unapplied edits in " + pendingSections.join(" and ") + ". Apply or restore them before Save preset."
+                        : !capturedHere ? "Checking the current rig before Save."
+                        : presets.presetChanged ? "Applied or changed, not saved. Save preset keeps the whole PiPedal preset."
+                        : "Saved. The whole current PiPedal preset is saved."}
                 </Typography>
             </Stack>
         </Box>}
@@ -528,7 +674,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                             <Typography component="h3" variant="h6">Plugin settings · Current rig</Typography>
                             <Typography variant="body2" color="text.secondary">These captured settings belong to this TONE3000 instance in the current rig. Apply changes, then use PiPedal Save to keep them.</Typography>
                             <TextField select size="small" label="Processing policy" value={follow ? "follow" : "saved"}
-                                onChange={event => { rigDirty.current = true; setFollow(event.target.value === "follow"); }}>
+                                onChange={event => changeFollow(event.target.value === "follow")}>
                                 <MenuItem value="follow">Follow device defaults</MenuItem>
                                 <MenuItem value="saved">Keep saved settings</MenuItem>
                             </TextField>
@@ -565,7 +711,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                             <TextField select size="small" label="Processing profile" value={profileId}
                                 onChange={event => {
                                     const profile = defaults.profiles.find(candidate => candidate.id === event.target.value);
-                                    if (profile) { profileDirty.current = true; setProfileId(profile.id); setProfileDraft(profile.defaults); }
+                                    if (profile) chooseProfile(profile.id, profile.defaults);
                                 }}>
                                 {defaults.profiles.map(profile => <MenuItem key={profile.id} value={profile.id}>{profile.name}
                                     {profile.id === defaults.activeProfile ? " · Active defaults" : ""}</MenuItem>)}
@@ -585,7 +731,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                                 <Button variant="contained" disabled={busy || !profileDirty.current || !validCalibration(profileDraft.inputCalibrationLevel)}
                                     onClick={() => { void saveDefaults(); }}>Save defaults</Button>
                                 <Button disabled={busy || !defaults.appDefaults} onClick={() => {
-                                    if (defaults.appDefaults) { profileDirty.current = true; setProfileDraft(defaults.appDefaults); }
+                                    if (defaults.appDefaults) chooseProfile(profileIdRef.current, defaults.appDefaults);
                                 }}>Use T3K app defaults</Button>
                             </Box>
                         </Stack>

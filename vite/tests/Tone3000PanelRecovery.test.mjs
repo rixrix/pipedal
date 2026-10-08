@@ -12,6 +12,7 @@ const path = name => fileURLToPath(new URL("../src/pipedal/" + name, import.meta
 const compiled = async name => (await build({ entryPoints: [path(name)], bundle: true, write: false,
     platform: "node", format: "cjs", logLevel: "silent" })).outputFiles[0].text;
 const observableCode = await compiled("ObservableProperty.tsx"), rigCode = await compiled("Tone3000Rig.ts");
+const editStateCode = await compiled("Tone3000EditState.ts");
 const flush = async () => { for (let i = 0; i < 10; ++i) await Promise.resolve(); };
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
@@ -24,6 +25,11 @@ function fixture(kind, section = "Blocks") {
     const context = { module: { exports: {} }, exports: {}, console, State: { Ready: 1, Reconnecting: 2 },
         alive: { current: true }, working: { current: false }, generation: { current: 0 }, operationGeneration: { current: 0 },
         rigDirty: { current: false }, profileDirty: { current: false }, waitingRef: { current: false }, rigRef: { current: null },
+        draftRef: { current: null }, followRef: { current: false }, defaultsRef: { current: null },
+        profileDraftRef: { current: null }, profileIdRef: { current: "" }, staleRef: { current: false },
+        activeRef: { current: true }, captureReadyRef: { current: false }, captureOwner: { current: null },
+        ownership: { current: { key: "", epoch: 0 } }, saveCancellation: { current: null },
+        draftToken: { current: Symbol("test panel") },
         active: true, open: true, section, instanceId: 1, busy: false, refreshing: false,
         error: "", notice: "", recoveryNotice: "", stale: false, waiting: false, connected: true,
         window: { setInterval: () => 1, clearInterval() {} } };
@@ -33,13 +39,16 @@ function fixture(kind, section = "Blocks") {
     };
     const { ObservableProperty } = runModule(observableCode);
     Object.assign(context, runModule(rigCode));
+    Object.assign(context, runModule(editStateCode));
+    context.registry = context.tone3000EditDrafts(context);
     for (const name of ["Busy", "Refreshing", "Connected", "PendingLoad", "Preview", "PerformanceOpen", "BundleOpen", "RecoveryNotice", "Notice", "Error", "Library",
-        "Rig", "Draft", "Follow", "Defaults", "ProfileId", "ProfileDraft", "Status", "Stale", "Waiting"]) {
+        "Rig", "Draft", "Follow", "Defaults", "ProfileId", "ProfileDraft", "Status", "Stale", "Waiting", "CaptureReady", "BusyLabel"]) {
         const key = name[0].toLowerCase() + name.slice(1);
         context["set" + name] = value => {
             context[key] = typeof value === "function" ? value(context[key]) : value;
             if (key === "rig") context.rigRef.current = context.rig;
             if (key === "waiting") context.waitingRef.current = context.waiting;
+            if (context[key + "Ref"]) context[key + "Ref"].current = context[key];
         };
     }
     const block = { blockId: "amp", lane: "left", index: 0, type: "nam", title: "Amp", gear: "amp", format: "nam",
@@ -55,6 +64,9 @@ function fixture(kind, section = "Blocks") {
     let currentValue = current, libraryValue = { entries: [], warnings: [] }, profileValue = profile;
     const model = context.model = {
         state: new ObservableProperty(context.State.Ready),
+        banks: new ObservableProperty({ selectedBank: 6 }), presets: new ObservableProperty({ selectedInstanceId: 26, presetChanged: false }),
+        selectedSnapshot: new ObservableProperty(-1),
+        pedalboard: new ObservableProperty({ tryGetItem: () => ({ uri: "https://www.tone3000.com/plugin" }) }),
         showAlert: message => alerts.push(message),
         getTone3000CurrentState: async () => { reads.push("current"); return currentValue; },
         getTone3000Library: async () => { reads.push("library"); return libraryValue; },
@@ -83,13 +95,20 @@ function fixture(kind, section = "Blocks") {
         vm.runInNewContext(js, context, { filename });
     };
     for (const name of kind === "library" ? ["refresh", "run", "add", "upload"]
-        : ["acceptRig", "acceptDefaults", "refresh", "run", "edit", "apply", "saveDefaults"]) install(name, variables.get(name));
+        : ["ownerKey", "ownerCurrent", "invalidateCapture", "publishDraft", "acceptRig", "acceptDefaults", "refresh", "run", "edit", "apply", "saveDefaults"]) install(name, variables.get(name));
+    if (kind === "rig") {
+        context.ownership.current.key = context.ownerKey();
+        context.renderedOwner = { ...context.ownership.current };
+    }
     install("mount", effects.find(effect => effect.getText(source).includes("const connectionChanged")));
     if (kind === "rig") install("mountDisposal", effects.find(effect => effect.getText(source).includes("() => { ++operationGeneration.current")));
     let cleanup = context.mount(), dispose = context.mountDisposal?.();
     return { context, model, reads, writes, uploads, alerts, current, profile,
         setCurrent: value => { currentValue = value; }, setLibrary: value => { libraryValue = value; },
-        lose: () => model.state.set(context.State.Reconnecting), ready: () => model.state.set(context.State.Ready),
+        lose: () => model.state.set(context.State.Reconnecting), ready: () => {
+            model.state.set(context.State.Ready);
+            if (kind === "rig") context.renderedOwner = { ...context.ownership.current };
+        },
         reopen: () => { cleanup?.(); context.open = false; context.mount(); context.open = true; cleanup = context.mount(); },
         remountInactive: () => { cleanup(); context.active = false; cleanup = context.mount(); },
         cleanup: () => { cleanup?.(); dispose?.(); } };
@@ -147,7 +166,9 @@ test("Rig Apply interruption preserves draft/revision conflict and refresh confi
     assert.equal(f.writes[0].args[2].blocks[0].mix, .9);
     f.lose(); assert.equal(f.context.busy, false); assert.equal(f.context.waiting, false);
     assert.equal(f.context.rigDirty.current, true); assert.equal(f.context.draft.blocks[0].mix, .9);
-    const actual = structuredClone(f.current); actual.revision = "applied"; actual.summary.blocks[0].mix = .9;
+    // A different observed edit remains a conflict; exact draft matches are
+    // reconciled by the full production-component tests in Tone3000EditState.
+    const actual = structuredClone(f.current); actual.revision = "applied"; actual.summary.blocks[0].mix = .85;
     f.setCurrent(actual); f.ready(); await flush();
     assert.equal(f.context.stale, true); assert.equal(f.context.rig.revision, "original");
     assert.equal(f.writes.length, 1, "reconcile never reapplies the patch");
