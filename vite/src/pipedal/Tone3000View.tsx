@@ -137,7 +137,7 @@ function Tone3000Panel({ host, controls, instanceId }: { host: ICustomizationHos
     if (other.length) tabNames.push("Other");
     const active = tabNames.includes(selected) ? selected : "Tone";
     return (
-        <Box className="t3k-controls" sx={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, pt: 1, pb: 3, boxSizing: "border-box", containerType: "inline-size",
+        <Box className="t3k-controls t3k-panel" sx={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, pt: 1, pb: 3, boxSizing: "border-box", containerType: "inline-size",
             "& .MuiButton-root": { minHeight: 44 },
             "@container (max-width: 440px)": {
                 "& .t3k-section": { flexBasis: "100%", p: 1 },
@@ -150,7 +150,7 @@ function Tone3000Panel({ host, controls, instanceId }: { host: ICustomizationHos
                 "& .MuiFormControlLabel-root": { minHeight: 44 },
                 "& .MuiInputBase-input": { fontSize: 16 }
             } }}>
-            <Box sx={{ display: "flex", alignItems: "center", minWidth: 0, flexShrink: 0, gap: 0.5, px: 0.5 }}>
+            <Box className="t3k-tabbar" sx={{ display: "flex", alignItems: "center", minWidth: 0, flexShrink: 0, gap: 0.5, px: 0.5, bgcolor: "background.default" }}>
             <Tabs value={active} onChange={(_event, next: string) => {
                 setSelected(next);
                 if (scrollContainer.current) scrollContainer.current.scrollTop = 0;
@@ -161,7 +161,7 @@ function Tone3000Panel({ host, controls, instanceId }: { host: ICustomizationHos
                     id={id + "-tab-" + title} aria-controls={id + "-panel-" + title} />)}
             </Tabs>
             </Box>
-            <Box ref={scrollContainer} sx={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", py: 1, pb: 6, overscrollBehavior: "contain" }}>
+            <Box className="t3k-panel-scroll" ref={scrollContainer} sx={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", py: 1, pb: 6, overscrollBehavior: "contain" }}>
                 {tabNames.map(title => (
                     <Box key={title} role="tabpanel" id={id + "-panel-" + title}
                         aria-labelledby={id + "-tab-" + title} hidden={active !== title}>

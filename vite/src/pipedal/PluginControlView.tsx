@@ -1052,9 +1052,11 @@ const PluginControlView =
                 if (pedalboardItem.midiChannelBinding && midiChannelBindingControlFeatureEnabled) {
                     nodes.push(this.midiBindingControl(pedalboardItem));
                 }
+                // T3K-only wrapper hooks release fixed heights in the short-screen parent scroll layout.
+                // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [7.14]
                 return (
-                    <div className={scrollClass}>
-                        <div className={gridClass}  >
+                    <div className={scrollClass + (pedalboardItem.uri === "https://www.tone3000.com/plugin" ? " t3k-plugin-scroll" : "")}>
+                        <div className={gridClass + (pedalboardItem.uri === "https://www.tone3000.com/plugin" ? " t3k-plugin-grid" : "")} >
                             {
                                 nodes
                             }
@@ -1095,7 +1097,7 @@ const PluginControlView =
 
 
                 return (
-                    <div className={frameClass}>
+                    <div className={frameClass + (pedalboardItem.uri === "https://www.tone3000.com/plugin" ? " t3k-plugin-frame" : "")}>
                         <div className={classes.vuMeterL}>
                             <VuMeter displayText={true} display="input" instanceId={pedalboardItem.instanceId} />
                         </div>

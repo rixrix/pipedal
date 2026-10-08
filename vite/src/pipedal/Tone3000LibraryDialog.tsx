@@ -223,6 +223,17 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                     {filter !== "saved" && <Typography variant="body2" color="text.secondary">
                         Status refers to each T3K source file. Exporting creates another file; it does not remove your saved PiPedal rig.
                     </Typography>}
+                    <Box component="details" sx={{ minWidth: 0 }}>
+                        <Box component="summary" sx={{ minHeight: 44, cursor: "pointer", py: 1, boxSizing: "border-box" }}>More tools</Box>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            Add saves a new copy; Load plays it; Update replaces it from T3K.
+                            Upload complete .t3kpreset rigs. For separate NAM models or IRs, add them in TONE3000 and save a preset first.
+                        </Typography>
+                        <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
+                            <Button disabled={busy || !connected} onClick={() => setBundleOpen(true)}>Check rig bundle</Button>
+                            <Button disabled={busy || !connected} onClick={() => setPerformanceOpen(true)}>Four-switch setup</Button>
+                        </Stack>
+                    </Box>
                     {!(filter === "saved" ? savedCopies.length : entries.length) && !refreshing && <Typography color="text.secondary">
                         {library.entries.length ? "No matching rigs." : "No rigs found. Save a preset in TONE3000 or upload a .t3kpreset file."}
                     </Typography>}
@@ -283,17 +294,6 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                 </Stack>
             </DialogContent>
             <DialogActions sx={{ px: { xs: 1.5, sm: 3 }, alignItems: "flex-start", gap: 1 }}>
-                <Box component="details" sx={{ flex: 1, minWidth: 0 }}>
-                    <Box component="summary" sx={{ minHeight: 44, cursor: "pointer", py: 1, boxSizing: "border-box" }}>More tools</Box>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                        Add saves a new copy; Load plays it; Update replaces it from T3K.
-                        Upload complete .t3kpreset rigs. For separate NAM models or IRs, add them in TONE3000 and save a preset first.
-                    </Typography>
-                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
-                        <Button disabled={busy || !connected} onClick={() => setBundleOpen(true)}>Check rig bundle</Button>
-                        <Button disabled={busy || !connected} onClick={() => setPerformanceOpen(true)}>Four-switch setup</Button>
-                    </Stack>
-                </Box>
                 <Button disabled={busy} onClick={() => { if (!working.current) onClose(); }}>Close</Button>
             </DialogActions>
         </DialogEx>

@@ -329,7 +329,8 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         }
         const card = blockCards.current.get(focusedBlock.blockId);
         if (card) {
-            card.style.scrollMarginTop = ((actionBar.current?.offsetHeight ?? 0) + 8) + "px";
+            const tabs = card.closest(".t3k-landscape")?.querySelector<HTMLElement>(".t3k-tabbar");
+            card.style.scrollMarginTop = ((actionBar.current?.offsetHeight ?? 0) + (tabs?.offsetHeight ?? 0) + 8) + "px";
             card.scrollIntoView({ block: "start", inline: "nearest", behavior: "smooth" });
             card.focus({ preventScroll: true });
             lastFocused.current = focusedBlock;
@@ -622,7 +623,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         <Stack className="t3k-rig-panel t3k-controls" spacing={1.5} sx={{ px: 1, minWidth: 0, maxWidth: 1100,
         "& .MuiButton-root": { whiteSpace: "normal", minHeight: 44 },
         "& .MuiFormControl-root": { maxWidth: "100%", minWidth: 0 } }}>
-        {rig && draft && <Box ref={actionBar} role="region" aria-label={section === "Blocks" ? "Apply block changes" : "Apply rig settings"}
+        {rig && draft && <Box className="t3k-applybar" ref={actionBar} role="region" aria-label={section === "Blocks" ? "Apply block changes" : "Apply rig settings"}
             sx={{ position: "sticky", top: 0, zIndex: 2, bgcolor: "background.paper",
                 borderBottom: 1, borderColor: "divider", p: 1, minWidth: 0 }}>
             <Stack spacing={.5}>

@@ -17,6 +17,7 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import "./Tone3000Actions.css";
 import { tone3000ViewportStyles } from "./Tone3000MobileLayout";
 import { SyntheticEvent } from 'react';
 import { Theme } from '@mui/material/styles';
@@ -674,8 +675,10 @@ export const MainPage =
                     const tone3000Panel = pluginUri === "https://www.tone3000.com/plugin";
                     const t3kViewport = tone3000ViewportStyles(this.state.screenHeight, horizontalScrollLayout);
 
+                    // Keep the short-screen scroll owner explicit; the T3K stylesheet releases its nested fixed heights.
+                    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [7.14]
                     return (
-                        <div className={classes.frame}>
+                        <div className={classes.frame + (tone3000Panel && horizontalScrollLayout ? " t3k-landscape" : "")}>
                             <div id="pedalboardScroll" className={horizontalScrollLayout ? classes.pedalboardScrollSmall : classes.pedalboardScroll}
                                 style={tone3000Panel ? t3kViewport.chain
                                     : { maxHeight: horizontalScrollLayout ? undefined : this.state.screenHeight / 2 }}>
