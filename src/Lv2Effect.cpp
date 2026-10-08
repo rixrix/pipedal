@@ -20,6 +20,9 @@
 #include "pch.h"
 #include "restrict.hpp"
 #include "Lv2Effect.hpp"
+#include "../tools/gig-rig/Tone3000StageBridge.hpp"
+#include <array>
+#include <cstring>
 #include "PiPedalException.hpp"
 #include <lv2/lv2plug.in/ns/ext/worker/worker.h>
 #include <lilv/lilv.h>
@@ -1472,6 +1475,33 @@ void Lv2Effect::SetLv2State(Lv2PluginState &state)
         Lv2Log::error("Failed to restore LV2 state.");
     }
 }
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5] */
+int32_t Lv2Effect::SubmitTone3000Stage(uint64_t token, uint32_t command, const std::string& payload)
+{
+    if (!pInstance || GetUri() != "https://www.tone3000.com/plugin") return TONE3000_STAGE_UNSUPPORTED;
+    const auto* bridge = static_cast<const Tone3000StageBridge*>(lilv_instance_get_extension_data(pInstance, TONE3000_STAGE_URI));
+    if (!bridge || bridge->abiVersion != TONE3000_STAGE_ABI_VERSION || !bridge->submit || !bridge->read
+        || bridge->maxRequestBytes != TONE3000_STAGE_MAX_REQUEST || bridge->maxResponseBytes != TONE3000_STAGE_MAX_RESPONSE)
+        return TONE3000_STAGE_UNSUPPORTED;
+    if (!token || payload.size() > TONE3000_STAGE_MAX_REQUEST) return TONE3000_STAGE_INVALID;
+    return bridge->submit(lilv_instance_get_handle(pInstance), token, command, payload.data(), payload.size());
+}
+int32_t Lv2Effect::ReadTone3000Stage(uint64_t token, std::string& result)
+{
+    result.clear();
+    if (!pInstance || GetUri() != "https://www.tone3000.com/plugin") return TONE3000_STAGE_UNSUPPORTED;
+    const auto* bridge = static_cast<const Tone3000StageBridge*>(lilv_instance_get_extension_data(pInstance, TONE3000_STAGE_URI));
+    if (!bridge || bridge->abiVersion != TONE3000_STAGE_ABI_VERSION || !bridge->read
+        || bridge->maxResponseBytes != TONE3000_STAGE_MAX_RESPONSE) return TONE3000_STAGE_UNSUPPORTED;
+    std::array<char, TONE3000_STAGE_MAX_RESPONSE> buffer{};
+    const int32_t bytes = bridge->read(lilv_instance_get_handle(pInstance), token, buffer.data(), buffer.size());
+    if (bytes <= 0) return bytes;
+    if (bytes > static_cast<int32_t>(buffer.size()) || buffer[bytes - 1] != 0
+        || std::memchr(buffer.data(), 0, bytes - 1)) return TONE3000_STAGE_INVALID;
+    result.assign(buffer.data(), bytes - 1);
+    return bytes;
+}
+
 bool Lv2Effect::GetLv2State(Lv2PluginState *state)
 {
     if (!this->stateInterface)

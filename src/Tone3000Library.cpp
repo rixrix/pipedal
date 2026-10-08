@@ -6,6 +6,7 @@
 #include "PiPedalException.hpp"
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <fcntl.h>
 #include <iterator>
 #include <map>
@@ -54,6 +55,35 @@ JSON_MAP_END()
 JSON_MAP_BEGIN(Tone3000LoadRequest)
 JSON_MAP_REFERENCE(Tone3000LoadRequest, bankId)
 JSON_MAP_REFERENCE(Tone3000LoadRequest, presetId)
+JSON_MAP_END()
+
+JSON_MAP_BEGIN(Tone3000PreviewRequest)
+JSON_MAP_REFERENCE(Tone3000PreviewRequest, key)
+JSON_MAP_REFERENCE(Tone3000PreviewRequest, sha256)
+JSON_MAP_REFERENCE(Tone3000PreviewRequest, expectedImportSha256)
+JSON_MAP_REFERENCE(Tone3000PreviewRequest, bankId)
+JSON_MAP_REFERENCE(Tone3000PreviewRequest, presetId)
+JSON_MAP_REFERENCE(Tone3000PreviewRequest, instanceId)
+JSON_MAP_END()
+JSON_MAP_BEGIN(Tone3000PreviewState)
+JSON_MAP_REFERENCE(Tone3000PreviewState, summary)
+JSON_MAP_REFERENCE(Tone3000PreviewState, namCount)
+JSON_MAP_REFERENCE(Tone3000PreviewState, irCount)
+JSON_MAP_REFERENCE(Tone3000PreviewState, embeddedBytes)
+JSON_MAP_END()
+JSON_MAP_BEGIN(Tone3000PreviewResult)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, key)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, sha256)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, name)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, source)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, targetName)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, sourceState)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, targetState)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, active)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, hasUnsavedChanges)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, hasSnapshotOverrides)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, replaces)
+JSON_MAP_REFERENCE(Tone3000PreviewResult, preserves)
 JSON_MAP_END()
 
 namespace {
@@ -249,6 +279,63 @@ Tone3000Library::Source Tone3000Library::Resolve(const std::string& key,const st
         return source;
     }
     throw PiPedalArgumentException("Preset source is unavailable; refresh the library.");
+}
+
+/** Reject unknown, duplicate (at the socket reader), oversized and coerced fields.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-SEC] [DES-STAGE] [7.1]
+ */
+void Tone3000Library::ValidatePreviewRequestJson(const json_variant& value) {
+    if (!value.is_object()) throw PiPedalArgumentException("Preview request must be an object.");
+    for (const auto& [key, field]:*value.as_object()) {
+        if (key=="key" || key=="sha256" || key=="expectedImportSha256") {
+            if (!field.is_string() || field.as_string().size()>4096)
+                throw PiPedalArgumentException("Invalid preview identity.");
+        } else if (key=="bankId" || key=="presetId" || key=="instanceId") {
+            if (!field.is_number() || !std::isfinite(field.as_number())
+                || field.as_number()!=std::floor(field.as_number()) || field.as_number() < -1
+                || field.as_number()>9007199254740991.0)
+                throw PiPedalArgumentException("Invalid preview target identity.");
+        } else throw PiPedalArgumentException("Unknown preview request field.");
+    }
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [DES-SEC] [7.1] */
+Tone3000PreviewResult Tone3000Library::Preview(const Tone3000PreviewRequest& request, const Pedalboard* savedTarget) const {
+    const bool target=request.bankId_>=0 && request.presetId_>=0 && request.instanceId_>=0;
+    const bool sourceOnly=request.bankId_==-1 && request.presetId_==-1 && request.instanceId_==-1;
+    auto validHash=[](const std::string& hash) {
+        return hash.size()==64 && std::all_of(hash.begin(),hash.end(),[](char c){return (c>='0' && c<='9') || (c>='a' && c<='f');});
+    };
+    if ((!target && !sourceOnly) || target!=(savedTarget!=nullptr) || request.key_.empty() || request.key_.size()>4096
+        || !validHash(request.sha256_) || (target ? !validHash(request.expectedImportSha256_) : !request.expectedImportSha256_.empty()))
+        throw PiPedalArgumentException("Invalid source or saved-target preview identity.");
+    const auto source=Resolve(request.key_,request.sha256_);
+    const auto bytes=ReadFile(source.path);
+    if (Digest(bytes)!=request.sha256_) throw PiPedalStateException("Source preset changed; refresh before previewing.");
+    auto describe=[](const Lv2PluginState& state) {
+        Tone3000PreviewState result;
+        const auto info=Tone3000Preset::InspectState(state);
+        result.summary_=Tone3000Preset::SummarizeState(state);
+        result.namCount_=info.namCount; result.irCount_=info.irCount; result.embeddedBytes_=info.embeddedBytes;
+        return result;
+    };
+    Tone3000PreviewResult result;
+    result.key_=source.entry.key_; result.sha256_=source.entry.sha256_;
+    result.name_=source.entry.name_; result.source_=source.entry.source_;
+    result.sourceState_=describe(Tone3000Preset::BuildState(bytes,source.path.filename().string(),source.section));
+    if (savedTarget) {
+        const auto* item=savedTarget->GetItem(request.instanceId_);
+        if (!item || item->uri()!=Tone3000Preset::PLUGIN_URI
+            || (item->tone3000SourceKey()!=request.key_ && item->tone3000SourceKey()!=source.entry.key_
+                && std::find(source.aliases.begin(),source.aliases.end(),item->tone3000SourceKey())==source.aliases.end())
+            || item->tone3000SourceHash()!=request.expectedImportSha256_)
+            throw PiPedalStateException("Saved target changed or is not mapped to this source; refresh before previewing.");
+        result.targetName_=savedTarget->name(); result.targetState_=describe(item->lv2State());
+        result.hasSnapshotOverrides_=HasSnapshotOverrides(*savedTarget,request.instanceId_);
+    }
+    result.replaces_={"36 preset-managed tone controls", "Complete embedded chain, routing and NAM/IR caches", "Block bypass, gain, mix, EQ, normalization and Lite/Full requests"};
+    result.preserves_={"Seven session controls, input mode, editor settings and MIDI mappings", "Saved board identity, other effects and snapshots", "Follow-defaults policy: current device processing defaults still apply when loaded"};
+    return result;
 }
 
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [DES-SEC] [3.9] */

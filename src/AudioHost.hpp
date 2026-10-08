@@ -229,12 +229,16 @@ namespace pipedal
         virtual void SetNotificationCallbacks(IAudioHostCallbacks *pNotifyCallbacks) = 0;
 
         virtual void SetListenForMidiEvent(bool listen) = 0;
+        virtual void SetListenForMidiProgramEvent(bool listen) = 0;
         virtual void SetListenForAtomOutput(bool listen) = 0;
 
         //virtual bool UpdatePluginStates(Pedalboard &pedalboard) = 0;
         virtual bool UpdatePluginState(PedalboardItem &pedalboardItem) = 0;
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
         virtual bool CapturePluginState(uint64_t instanceId, Lv2PluginState* state) = 0;
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5] */
+        virtual int32_t SubmitTone3000Stage(uint64_t instanceId, uint64_t token, uint32_t command, const std::string& payload) = 0;
+        virtual int32_t ReadTone3000Stage(uint64_t instanceId, uint64_t token, std::string& result) = 0;
 
         virtual std::string AtomToJson(const LV2_Atom *atom) = 0;
 

@@ -195,6 +195,36 @@ namespace
     }
 }
 
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-EXPORT] [7.11] */
+TEST_CASE("Native user export preserves assets and excludes session settings", "[tone3000_preset]")
+{
+    const auto original = Tone3000Preset::BuildState(File(PresetBody(Snapshot(),
+        {Param("outputLevel", .61), Param("pitchSemitones", -2), Param("chainPanLeft", .18)})), "source.t3kpreset");
+    Tone3000StatePatch patch;
+    patch.calibrateInput_ = true; patch.inputCalibrationLevel_ = 17; patch.osEnabled_ = true; patch.osFactor_ = 2;
+    const auto edited = Tone3000Preset::EditState(original, patch);
+    const auto exported = Tone3000Preset::ExportPreset(edited, "pipedal-rx-6-26", "Rx working copy");
+    const auto info = Tone3000Preset::Inspect(exported, "pipedal-rx-6-26.t3kpreset");
+    CHECK(info.id == "user:pipedal-rx-6-26"); CHECK(info.name == "Rx working copy");
+    CHECK(info.namCount == 1); CHECK(info.irCount == 1);
+    CHECK(Contains(exported, Snapshot()));
+    CHECK(Contains(exported, Param("outputLevel", .61)));
+    CHECK(Contains(exported, Param("pitchSemitones", -2)));
+    CHECK(Contains(exported, Param("chainPanLeft", .18)));
+    for (const auto& session : {"targetLoudness", "calibrateInput", "inputCalibrationLevel",
+                               "chainSoloLeft", "chainSoloRight", "osEnabled", "osFactor", "inputMode", "MidiMappings"})
+        CHECK_FALSE(Contains(exported, TextBytes(session)));
+    auto imported = Tone3000Preset::BuildState(exported, "pipedal-rx-6-26.t3kpreset");
+    CHECK(Contains(StateBytes(imported), Snapshot()));
+    CHECK(Contains(StateBytes(imported), Param("outputLevel", .61, "PARAM")));
+    auto retained = Tone3000Preset::BuildState(exported, "pipedal-rx-6-26.t3kpreset", "user", &edited);
+    CHECK(Tone3000Preset::SummarizeState(retained).inputCalibrationLevel_ == 17);
+    CHECK(Tone3000Preset::SummarizeState(retained).osFactor_ == 2);
+    CHECK_THROWS(Tone3000Preset::ExportPreset(edited, "../outside", "Rx"));
+    CHECK_THROWS(Tone3000Preset::ExportPreset(edited, "valid", ""));
+    CHECK_THROWS(Tone3000Preset::ExportPreset(Lv2PluginState{}, "valid", "Rx"));
+}
+
 /**
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-2] [FR-11] [DES-LIBRARY] [DES-STATE] [3.8]
  */
@@ -602,4 +632,30 @@ TEST_CASE("Direct codec accepts the pinned real factory preset files", "[tone300
         ++count;
     }
     REQUIRE(count == 8);
+}
+
+/** Cached variants (not only active assets) are counted without returning blobs.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [7.1]
+ */
+TEST_CASE("Tone3000 preview counts every cached NAM and IR variant in stored state", "[gig_rig][gig_rig_codec][Build]") {
+    const std::vector<Bytes> cache{
+        Node("CachedModel", {{"modelId", IntValue(19)}, {"data", Variant(8, {0,1,2,3})}}),
+        Node("CachedModel", {{"modelId", IntValue(20)}, {"data", Variant(8, {4,5})}})};
+    auto bypassed=Block("amp", "nam", 19, {}, &cache);
+    // Set the independent fixture enabled=false before encoding the full tree.
+    const auto enabled=TextBytes("enabled");
+    const auto at=std::search(bypassed.begin(),bypassed.end(),enabled.begin(),enabled.end());
+    REQUIRE(at!=bypassed.end());
+    *(at+enabled.size()+2)=3; // compressed payload-length byte then bool marker
+    const auto file=File(PresetBody(Snapshot({bypassed},{Block("cab","ir",21,{8,9,10})})));
+    const auto info=Tone3000Preset::Inspect(file,"rig.t3kpreset");
+    REQUIRE(info.namCount==2); REQUIRE(info.irCount==1); REQUIRE(info.modelCount==2); REQUIRE(info.embeddedBytes==9);
+    const auto state=Tone3000Preset::BuildState(file,"rig.t3kpreset");
+    const auto before=state.values_.at(Tone3000Preset::STATE_URI).value_;
+    const auto stored=Tone3000Preset::InspectState(state);
+    REQUIRE(stored.namCount==2); REQUIRE(stored.irCount==1); REQUIRE(stored.embeddedBytes==9);
+    REQUIRE_FALSE(Tone3000Preset::SummarizeState(state).blocks_.front().enabled_);
+    REQUIRE(state.values_.at(Tone3000Preset::STATE_URI).value_==before);
+    auto bad=state; bad.values_.at(Tone3000Preset::STATE_URI).value_={'b','a','d',0};
+    REQUIRE_THROWS(Tone3000Preset::InspectState(bad));
 }

@@ -223,3 +223,49 @@ TEST_CASE("Tone3000 storage appends and updates without selecting or changing st
     updated.items()[0].title("Reload same ID");storage.SaveTone3000Preset(first.bankId_,second.presetId_,updated,id);
     REQUIRE(storage.LoadPreset(second.presetId_));REQUIRE(storage.GetCurrentPreset().items()[0].title()=="Reload same ID");
 }
+
+/** Fixed roots and saved state only; successful and failed previews leave bytes intact.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [DES-SEC] [7.1]
+ */
+TEST_CASE("Tone3000 source and mapped saved target previews are guarded and read only", "[gig_rig][gig_rig_library][Build]") {
+    Temporary temp; auto app=temp.path/"app", file=app/"rig.t3kpreset";
+    const auto bytes=Fixture(); Put(file,bytes);
+    Tone3000Library library(temp.path,std::vector<Tone3000Library::Root>{{app,"app","Pi app","user"}});
+    const auto source=library.Scan(nullptr).front();
+    Tone3000PreviewRequest request;request.key_=source.entry.key_;request.sha256_=source.entry.sha256_;
+    const auto preview=library.Preview(request);
+    REQUIRE(preview.name_=="Rig one"); REQUIRE(preview.sourceState_.summary_.blocks_.size()==1);
+    REQUIRE(preview.sourceState_.namCount_==0); REQUIRE(preview.sourceState_.irCount_==0);
+    REQUIRE(preview.sourceState_.embeddedBytes_==0); REQUIRE_FALSE(preview.targetState_);
+    auto board=Board(); auto& item=board.items().front();
+    Tone3000StatePatch edit;edit.inputMode_="left";
+    Tone3000Library::ApplyState(item,Tone3000Preset::EditState(item.lv2State(),edit),request.key_,request.sha256_);
+    const auto before=Json(board);
+    request.bankId_=2;request.presetId_=3;request.instanceId_=item.instanceId();request.expectedImportSha256_=request.sha256_;
+    const auto target=library.Preview(request,&board);
+    REQUIRE(target.targetState_); REQUIRE(target.targetState_->summary_.inputMode_=="left");
+    REQUIRE(target.sourceState_.summary_.inputMode_=="stereo"); REQUIRE(target.targetName_==board.name());
+    REQUIRE_FALSE(target.replaces_.empty()); REQUIRE_FALSE(target.preserves_.empty());
+    REQUIRE(Json(board)==before); REQUIRE(Tone3000Library::ReadFile(file)==bytes);
+    const auto response=Json(target);
+    REQUIRE(response.find(temp.path.string())==std::string::npos);
+    REQUIRE(response.find("StateString")==std::string::npos); REQUIRE(response.find("ModelCache")==std::string::npos);
+    REQUIRE_FALSE(fs::exists(temp.path/"tone3000-library"));
+    request.expectedImportSha256_=std::string(64,'0'); REQUIRE_THROWS(library.Preview(request,&board));
+    request.expectedImportSha256_=request.sha256_;request.instanceId_+=100; REQUIRE_THROWS(library.Preview(request,&board));
+    request.instanceId_=item.instanceId();request.presetId_=-1; REQUIRE_THROWS(library.Preview(request,&board));
+    request.presetId_=3;item.tone3000SourceKey("unrelated"); REQUIRE_THROWS(library.Preview(request,&board));
+    item.tone3000SourceKey(source.entry.key_);Put(file,Fixture("rig-1","Changed"));
+    REQUIRE_THROWS(library.Preview(request,&board)); REQUIRE(Json(board)==before);
+}
+
+/** No coercion, paths, arbitrary object keys or malformed targets at the RPC boundary.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-SEC] [DES-STAGE] [7.1]
+ */
+TEST_CASE("Tone3000 preview JSON validates identifiers without coercion", "[gig_rig][gig_rig_library][Build]") {
+    auto parse=[](const std::string& text) {std::istringstream stream(text);json_reader reader(stream);json_variant value;reader.read(&value);return value;};
+    REQUIRE_NOTHROW(Tone3000Library::ValidatePreviewRequestJson(parse("{\"key\":\"source\",\"sha256\":\"hash\",\"bankId\":-1}")));
+    for (const auto& invalid:{"[]","{\"path\":\"/private/file\"}","{\"bankId\":1.5}","{\"instanceId\":-2}","{\"presetId\":\"1\"}","{\"sha256\":null}","{\"bankId\":9007199254740992}"})
+        REQUIRE_THROWS(Tone3000Library::ValidatePreviewRequestJson(parse(invalid)));
+    REQUIRE_THROWS(Tone3000Library::ValidatePreviewRequestJson(parse("{\"key\":\""+std::string(4097,'x')+"\"}")));
+}

@@ -152,8 +152,8 @@ void Tone3000Operations::ValidateRequestJson(const json_variant& object,const st
     FieldTypes(object,{"followDefaults","applyDefaults"},{},{},{},true);
     if(!object.as_object()->contains("patch")) return;
     const auto& patch=object["patch"];
-    Keys(patch,{"inputMode","calibrateInput","inputCalibrationLevel","osEnabled","osFactor","blocks"});
-    FieldTypes(patch,{"calibrateInput","osEnabled"},{"inputCalibrationLevel"},{"osFactor"},{"inputMode"},true);
+    Keys(patch,{"inputMode","calibrateInput","inputCalibrationLevel","osEnabled","osFactor","outputLevel","blocks"});
+    FieldTypes(patch,{"calibrateInput","osEnabled"},{"inputCalibrationLevel","outputLevel"},{"osFactor"},{"inputMode"},true);
     if(!patch.as_object()->contains("blocks")) return;
     const auto& blocks=patch["blocks"];Array(blocks,256);
     for(size_t i=0;i<blocks.size();++i) {

@@ -49,6 +49,7 @@
 #include "Tone3000Downloader.hpp"
 #include "Tone3000Preset.hpp"
 #include "AesDigest.hpp"
+#include "../tools/gig-rig/Tone3000StageBridge.hpp"
 #include "HtmlHelper.hpp"
 
 #ifndef NO_MLOCK
@@ -149,6 +150,8 @@ void PiPedalModel::Close()
 
         CancelAudioRetry();
         CancelConfiguredAudioRecovery();
+        CancelTone3000StageJobs();
+        tone3000LevelMeasurements.clear();
 
         if (avahiService)
         {
@@ -503,6 +506,7 @@ void PiPedalModel::RemoveNotificationSubsription(std::shared_ptr<IPiPedalModelSu
         int64_t clientId = pSubscriber->GetClientId();
 
         this->DeleteMidiListeners(clientId);
+        CancelTone3000StageJobs(clientId);
         this->DeleteAtomOutputListeners(clientId);
 
         for (int i = 0; i < this->outstandingParameterRequests.size(); ++i)
@@ -565,7 +569,10 @@ bool PiPedalModel::OnNotifyMaybeLv2StateChanged(uint64_t instanceId)
         bool changed = this->audioHost->UpdatePluginState(*item);
         if (changed)
         {
-
+            // Direct patch notifications also change opaque T3K state without a
+            // Stage job/capture. Recall must not retain the old port-only baseline.
+            // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
+            if (item->uri()==Tone3000Preset::PLUGIN_URI) previousPedalboardLoaded=false;
             item->stateUpdateCount(item->stateUpdateCount() + 1);
 
             Lv2PluginState newState = item->lv2State();
@@ -718,6 +725,9 @@ void PiPedalModel::SetPedalboard(int64_t clientId, Pedalboard &pedalboard)
 {
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
+        // Capture a completion against its old owner before assigning the desired board.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
+        CancelTone3000StageJobs();
         this->pedalboard = pedalboard;
         RegisterTone3000Intents();
         UpdateDefaults(&this->pedalboard);
@@ -731,6 +741,7 @@ void PiPedalModel::SetSnapshot(int64_t selectedSnapshot)
     bool pedalboardChanged = false;
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
+        CancelTone3000StageJobs(); // Retire the old owner before constructing a snapshot candidate.
         auto candidate=this->pedalboard.DeepCopy();
         if (candidate.ApplySnapshot(selectedSnapshot, pluginHost))
         {
@@ -791,6 +802,9 @@ void PiPedalModel::UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalbo
 {
     {
         std::lock_guard<std::recursive_mutex> lock(mutex);
+        // The supplied board is an intentional replacement, not a capture destination.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
+        CancelTone3000StageJobs(-1, false);
 
         // update vst3 presets if neccessary.
         // the pedalboard must be a manipualted instance of the current Lv2Pedalboard.
@@ -1394,6 +1408,7 @@ void PiPedalModel::OnNotifyMidiProgramChange(RealtimeMidiProgramRequest &midiPro
 void PiPedalModel::LoadPreset(int64_t clientId, int64_t instanceId)
 {
     std::lock_guard<std::recursive_mutex> guard{mutex};
+    CancelTone3000StageJobs();
 
     auto loaded = storage.GetPreset(instanceId).DeepCopy();
     ApplyTone3000FollowDefaults(loaded);
@@ -1655,6 +1670,10 @@ void PiPedalModel::RestartAudio(bool useDummyAudioDriver)
     {
         std::lock_guard guard(mutex);
         if (closed || !audioHost) return;
+        // Retain completed native edits while the old runtime and board still agree.
+        // Driver Close/join stays outside this lock.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
+        CancelTone3000StageJobs();
     }
     try
     {
@@ -1711,6 +1730,7 @@ void PiPedalModel::RestartAudio(bool useDummyAudioDriver)
 
         this->UpdateRealtimeVuSubscriptions();
         UpdateRealtimeMonitorPortSubscriptions();
+        UpdateMidiListenFlags();
         if (useDummyAudioDriver) ArmConfiguredAudioRecovery();
         else CancelConfiguredAudioRecovery();
     }
@@ -2229,6 +2249,7 @@ int64_t PiPedalModel::SaveBankAs(int64_t clientId, int64_t bankId, const std::st
 void PiPedalModel::OpenBank(int64_t clientId, int64_t bankId)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    CancelTone3000StageJobs();
 
     BankFile bank; storage.GetBankFile(bankId,&bank);
     auto loaded=bank.getItem(bank.selectedPreset()).preset().DeepCopy();
@@ -2637,6 +2658,7 @@ PluginUiPresets PiPedalModel::GetPluginUiPresets(const std::string &pluginUri)
 void PiPedalModel::LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetInstanceId)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    CancelTone3000StageJobs();
 
     PedalboardItem *pedalboardItem = this->pedalboard.GetItem(pluginInstanceId);
     if (pedalboardItem != nullptr)
@@ -2733,6 +2755,14 @@ PedalboardItem& PiPedalModel::CaptureTone3000Item(int64_t instanceId) {
     }
     // The codec validates assets/routing before exposing a current summary.
     Tone3000Preset::SummarizeState(actual);
+    // Compare with the graph baseline independently of the current model cache:
+    // UpdatePluginState notifications may have refreshed that cache already.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
+    if (previousPedalboardLoaded) {
+        auto loadedItem=previousPedalboard.GetItem(instanceId);
+        if (!loadedItem || loadedItem->uri()!=item->uri() || loadedItem->lv2State()!=actual)
+            previousPedalboardLoaded=false;
+    }
     if (actual!=item->lv2State()) {
         item->lv2State(std::move(actual));
         item->stateUpdateCount(item->stateUpdateCount()+1);
@@ -2761,6 +2791,185 @@ void PiPedalModel::GuardTone3000PendingStates(bool requireCapture) {
         }
     }
 }
+/** Cancel without blocking the native message thread; its deadline also guards a vanished client.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5]
+ */
+void PiPedalModel::CancelTone3000StageJobs(int64_t clientId, bool retainCurrentState) {
+    for(auto it=tone3000StageJobs.begin();it!=tone3000StageJobs.end();) {
+        if(clientId!=-1 && it->second.clientId!=clientId){++it;continue;}
+        if(it->second.postHandle)CancelPost(it->second.postHandle);
+        // Native CANCEL is serialized with completion and retains an already-done result.
+        // Reading first can miss a completion that wins just before cancellation.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
+        if(audioHost)audioHost->SubmitTone3000Stage(it->second.instanceId,it->second.token,TONE3000_STAGE_CANCEL,{});
+        if(retainCurrentState && !it->second.captured && Tone3000Stage::Mutates(it->second.command) && audioHost
+           && it->second.bankId==storage.GetBanks().selectedBank() && it->second.presetId==storage.GetCurrentPresetId()) {
+            try {
+                std::string raw;
+                if(audioHost->ReadTone3000Stage(it->second.instanceId,it->second.token,raw)>0
+                   && Tone3000Stage::Result(raw)["state"].as_string()=="done") {
+                    CaptureTone3000Item(it->second.instanceId);
+                    FirePedalboardChanged(clientId,false);
+                    SetPresetChanged(clientId,true,false);
+                }
+            } catch(const std::exception&) {}
+        }
+        it=tone3000StageJobs.erase(it);
+    }
+    if(clientId!=-1)for(auto it=tone3000LevelMeasurements.begin();it!=tone3000LevelMeasurements.end();)
+        if(it->second.clientId==clientId)it=tone3000LevelMeasurements.erase(it);else ++it;
+}
+/** The daemon captures completion even when the browser stops polling.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5]
+ */
+void PiPedalModel::ScheduleTone3000StagePoll(int64_t instanceId,uint64_t token) {
+    auto found=tone3000StageJobs.find(instanceId);
+    if(found==tone3000StageJobs.end() || found->second.token!=token || found->second.postHandle || closed)return;
+    found->second.postHandle=PostDelayed(std::chrono::milliseconds(250),[this,instanceId,token] {
+        std::lock_guard<std::recursive_mutex> lock(mutex);
+        auto found=tone3000StageJobs.find(instanceId);
+        if(found==tone3000StageJobs.end() || found->second.token!=token || closed)return;
+        found->second.postHandle=0;
+        try {
+            auto result=PollTone3000Stage(found->second.clientId,{instanceId,static_cast<int64_t>(token)});
+            if(!Tone3000Stage::Terminal(result))ScheduleTone3000StagePoll(instanceId,token);
+        } catch(const std::exception&) {
+            // Retire only this request, never a replacement on the same instance.
+            found=tone3000StageJobs.find(instanceId);
+            if(found!=tone3000StageJobs.end() && found->second.token==token) {
+                if(audioHost)audioHost->SubmitTone3000Stage(instanceId,token,TONE3000_STAGE_CANCEL,{});
+                tone3000StageJobs.erase(found);
+            }
+        }
+    });
+}
+json_variant PiPedalModel::StartTone3000Stage(int64_t clientId,const Tone3000StageRequest& request) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if(closed || !audioHost)throw PiPedalStateException("Audio is unavailable.");
+    const auto command=Tone3000Stage::Command(request.command_);
+    const auto current=GetTone3000CurrentState({request.instanceId_});
+    if(current.revision_!=request.expectedRevision_)throw PiPedalStateException("Rig changed; refresh before soundcheck.");
+    if(command==TONE3000_STAGE_MEASURE_OUTPUT && (hasPresetChanged || current.hasSnapshotOverrides_))
+        throw PiPedalStateException("Save the rig and clear snapshot overrides before comparing saved-rig levels.");
+    if(command!=TONE3000_STAGE_RUNTIME) {
+        const auto status=audioHost->getJackStatus();
+        if(!status.active_ || !status.engineRunning_.value_or(false) || status.usingFallback_.value_or(true))
+            throw PiPedalStateException("Connect the configured audio interface before soundcheck.");
+    }
+    auto previous=tone3000StageJobs.find(request.instanceId_);
+    if(previous!=tone3000StageJobs.end() && !previous->second.result.is_null() && !Tone3000Stage::Terminal(previous->second.result))
+        throw PiPedalStateException("Soundcheck is already active; complete or cancel it first.");
+    if(tone3000StageJobs.size()>=16 && previous==tone3000StageJobs.end())throw PiPedalStateException("Too many soundcheck requests.");
+    if(previous!=tone3000StageJobs.end() && previous->second.postHandle)CancelPost(previous->second.postHandle);
+    if(++nextTone3000StageToken>9007199254740991ULL)nextTone3000StageToken=1;
+    const auto token=nextTone3000StageToken;
+    const int32_t accepted=audioHost->SubmitTone3000Stage(request.instanceId_,token,command,request.payload_);
+    if(accepted<0) {
+        if(accepted==TONE3000_STAGE_UNSUPPORTED)throw PiPedalStateException("Installed TONE3000 plugin does not support PiPedal soundcheck. Install the qualified Stage Tools build.");
+        if(accepted==TONE3000_STAGE_BUSY)throw PiPedalStateException("Native soundcheck is busy; complete or cancel it first.");
+        throw PiPedalStateException("Native soundcheck rejected this request.");
+    }
+    Tone3000StageJob job;job.clientId=clientId;job.instanceId=request.instanceId_;job.token=token;job.command=command;
+    job.bankId=storage.GetBanks().selectedBank();job.presetId=storage.GetCurrentPresetId();
+    if(command==TONE3000_STAGE_MEASURE_OUTPUT) {
+        job.savedRevision=Tone3000Performance::Revision(storage.GetPreset(job.presetId));
+    }
+    job.result=json_variant::parse("{\"state\":\"queued\"}");
+    job.result["token"]=static_cast<double>(token);
+    tone3000StageJobs[request.instanceId_]=std::move(job);
+    ScheduleTone3000StagePoll(request.instanceId_,token);
+    return tone3000StageJobs[request.instanceId_].result;
+}
+json_variant PiPedalModel::PollTone3000Stage(int64_t clientId,const Tone3000StageRequest& request,bool cancel) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    auto found=tone3000StageJobs.find(request.instanceId_);
+    if(found==tone3000StageJobs.end() || found->second.clientId!=clientId || found->second.token!=request.token_)
+        throw PiPedalStateException("Soundcheck request expired; start again on the current rig.");
+    auto& job=found->second;
+    if(job.bankId!=storage.GetBanks().selectedBank() || job.presetId!=storage.GetCurrentPresetId() || !audioHost) {
+        CancelTone3000StageJobs(clientId);throw PiPedalStateException("The playing rig changed; soundcheck was cancelled.");
+    }
+    if(cancel)audioHost->SubmitTone3000Stage(job.instanceId,job.token,TONE3000_STAGE_CANCEL,{});
+    std::string raw;
+    const auto read=audioHost->ReadTone3000Stage(job.instanceId,job.token,raw);
+    if(read<0){if(job.postHandle)CancelPost(job.postHandle);tone3000StageJobs.erase(found);throw PiPedalStateException("Native soundcheck request expired.");}
+    if(read>0)job.result=Tone3000Stage::Result(raw);
+    job.result["token"]=static_cast<double>(job.token);
+    if(!job.captured && Tone3000Stage::Terminal(job.result) && Tone3000Stage::Mutates(job.command)
+       && job.result["state"].as_string()=="done") {
+        CaptureTone3000Item(job.instanceId);
+        job.captured=true;
+        FirePedalboardChanged(clientId,false);
+        SetPresetChanged(clientId,true,false);
+    }
+    if(Tone3000Stage::Terminal(job.result)) {
+        const auto current=GetTone3000CurrentState({job.instanceId});
+        job.result["revision"]=current.revision_;
+        job.result["bankId"]=static_cast<double>(job.bankId);
+        job.result["presetId"]=static_cast<double>(job.presetId);
+        job.result["instanceId"]=static_cast<double>(job.instanceId);
+        if(job.command==TONE3000_STAGE_MEASURE_OUTPUT) {
+            job.result["savedRevision"]=job.savedRevision;
+            if(!job.captured && job.result["state"].as_string()=="done" && job.result.as_object()->contains("valid") && job.result["valid"].is_bool()
+               && job.result["valid"].as_bool() && !hasPresetChanged
+               && Tone3000Performance::Revision(storage.GetPreset(job.presetId))==job.savedRevision) {
+                if(tone3000LevelMeasurements.size()>=32 && !tone3000LevelMeasurements.contains(job.token))tone3000LevelMeasurements.erase(tone3000LevelMeasurements.begin());
+                tone3000LevelMeasurements[job.token]=job;
+            }
+            // Terminal rejection is permanent too; Save later cannot legitimize
+            // a phrase played with changed upstream effects or a different rig.
+            job.captured=true;
+            job.result["receiptValid"]=tone3000LevelMeasurements.contains(job.token);
+        }
+    }
+    return job.result;
+}
+
+/** Apply one measured output trim to the exact saved rig; no drive/calibration changes.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-21] [DES-STAGE-BRIDGE] [7.6]
+ */
+json_variant PiPedalModel::ApplyTone3000Level(int64_t clientId,uint64_t token,const std::string& revision,double target) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    auto found=tone3000LevelMeasurements.find(token);
+    if(found==tone3000LevelMeasurements.end() || found->second.clientId!=clientId)throw PiPedalStateException("Measurement expired; play the phrase again.");
+    const auto measurement=found->second;
+    BankFile bank;storage.GetBankFile(measurement.bankId,&bank);
+    auto board=bank.getItem(measurement.presetId).preset().DeepCopy();
+    if(revision!=measurement.savedRevision || Tone3000Performance::Revision(board)!=revision)
+        throw PiPedalStateException("Saved rig changed since measurement; measure it again.");
+    const bool active=storage.GetBanks().selectedBank()==measurement.bankId && storage.GetCurrentPresetId()==measurement.presetId;
+    if(active && hasPresetChanged)throw PiPedalStateException("Save or discard the playing rig's changes before applying this saved trim.");
+    auto item=board.GetItem(measurement.instanceId);
+    if(!item || item->uri()!=Tone3000Preset::PLUGIN_URI)throw PiPedalStateException("Measured plugin is no longer present.");
+    const double before=Tone3000Preset::OutputLevel(item->lv2State());
+    const double after=Tone3000Stage::MatchedOutput(measurement.result,target,before);
+    Tone3000StatePatch patch;patch.outputLevel_=after;
+    auto state=Tone3000Preset::EditState(item->lv2State(),patch);
+    Tone3000Library::ApplyState(*item,state,item->tone3000SourceKey(),item->tone3000SourceHash());
+    storage.SaveTone3000Preset(measurement.bankId,measurement.presetId,board,measurement.instanceId);
+    tone3000LevelMeasurements.erase(token);
+    FirePresetsChanged(clientId);
+    if(active)LoadPreset(clientId,measurement.presetId);
+    auto result=json_variant::parse("{\"applied\":true}");
+    result["trimDb"]=(after-before)*48;result["outputLevel"]=after;return result;
+}
+
+/** Saved state only: explicitly Save before exporting a playing draft.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-25] [DES-STAGE-EXPORT] [7.11]
+ */
+std::vector<uint8_t> PiPedalModel::ExportTone3000Preset(int64_t bankId,int64_t presetId,int64_t instanceId) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if(bankId<0 || presetId<0 || instanceId<0)throw PiPedalArgumentException("Choose one saved TONE3000 rig.");
+    if(storage.GetBanks().selectedBank()==bankId && storage.GetCurrentPresetId()==presetId && hasPresetChanged)
+        throw PiPedalStateException("Save the playing rig before exporting its T3K copy.");
+    BankFile bank;storage.GetBankFile(bankId,&bank);
+    auto& board=bank.getItem(presetId).preset();auto item=board.GetItem(instanceId);
+    if(!item || item->uri()!=Tone3000Preset::PLUGIN_URI)throw PiPedalArgumentException("Choose a saved TONE3000 instance.");
+    if(Tone3000Library::HasSnapshotOverrides(board,instanceId))throw PiPedalArgumentException("A native T3K preset cannot carry PiPedal snapshot overrides.");
+    const auto id="pipedal-"+std::to_string(bankId)+"-"+std::to_string(presetId)+"-"+std::to_string(instanceId);
+    return Tone3000Preset::ExportPreset(item->lv2State(),id,board.name());
+}
+
 Tone3000CurrentStateResult PiPedalModel::GetTone3000CurrentState(const Tone3000CurrentStateRequest& request) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     auto& item=CaptureTone3000Item(request.instanceId_);
@@ -2776,13 +2985,16 @@ Tone3000CurrentStateResult PiPedalModel::GetTone3000CurrentState(const Tone3000C
  */
 bool PiPedalModel::SetTone3000CurrentState(int64_t clientId,const Tone3000CurrentStateEdit& request) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    // Completion capture may change the revision; reject stale edits before cloning it.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
+    CancelTone3000StageJobs();
     auto current=GetTone3000CurrentState({request.instanceId_});
     if(request.expectedRevision_.empty() || request.expectedRevision_!=current.revision_)
         throw PiPedalStateException("Current rig changed; refresh before applying an edit.");
     auto board=pedalboard.DeepCopy();auto item=board.GetItem(request.instanceId_);
     const auto& patch=request.patch_;
     bool hasPatch=patch.inputMode_.has_value() || patch.calibrateInput_.has_value() || patch.inputCalibrationLevel_.has_value()
-        || patch.osEnabled_.has_value() || patch.osFactor_.has_value() || !patch.blocks_.empty();
+        || patch.osEnabled_.has_value() || patch.osFactor_.has_value() || patch.outputLevel_.has_value() || !patch.blocks_.empty();
     if(!hasPatch && !request.followDefaults_.has_value() && !request.applyDefaults_.value_or(false))
         throw PiPedalArgumentException("Choose a rig edit or defaults policy.");
     bool manualProcessing=patch.calibrateInput_.has_value() || patch.inputCalibrationLevel_.has_value()
@@ -2797,6 +3009,56 @@ bool PiPedalModel::SetTone3000CurrentState(int64_t clientId,const Tone3000Curren
     UpdateCurrentPedalboard(clientId,board,(hasPatch || apply)?std::vector<int64_t>{request.instanceId_}:std::vector<int64_t>{});
     pendingTone3000States[request.instanceId_]=std::move(intended);
     return true;
+}
+
+/** Saved choices contain revisions, never model bytes or current capture.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-18] [DES-STAGE-BANK] [7.4]
+ */
+Tone3000PerformanceSources PiPedalModel::GetTone3000PerformanceSources() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    Tone3000PerformanceSources result;
+    for(const auto& entry:storage.GetBanks().entries()){
+        if(!Tone3000Library::IsToneBank(entry.name()))continue;
+        BankFile bank;storage.GetBankFile(entry.instanceId(),&bank);
+        for(const auto& preset:bank.presets()){
+            auto& board=preset->preset();bool tone=false;
+            for(const auto* item:board.GetAllPlugins())if(item->uri()==Tone3000Preset::PLUGIN_URI)tone=true;
+            if(tone)result.sources_.push_back({entry.instanceId(),preset->instanceId(),board.name(),Tone3000Performance::Revision(board),entry.name()});
+            if(result.sources_.size()>2000)throw PiPedalStateException("Too many performance sources.");
+        }
+    }return result;
+}
+/** Validate every source before publishing any copied bank; never load it.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-18] [DES-STAGE-BANK] [7.4]
+ */
+Tone3000PerformanceResult PiPedalModel::CreateTone3000PerformanceBank(int64_t clientId,const Tone3000PerformanceRequest& request) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    Tone3000Performance::Validate(request);std::vector<Pedalboard> ordered;
+    for(const auto& selection:request.slots_){
+        const auto& index=storage.GetBanks().getBankIndexEntry(selection.bankId_);
+        if(!Tone3000Library::IsToneBank(index.name()))throw PiPedalArgumentException("Choose saved TONE3000 rigs.");
+        BankFile bank;storage.GetBankFile(selection.bankId_,&bank);
+        auto& board=bank.getItem(selection.presetId_).preset();
+        if(Tone3000Performance::Revision(board)!=selection.expectedRevision_)throw PiPedalStateException("A source rig changed; refresh before creating the bank.");
+        bool tone=false;
+        for(const auto* item:board.GetAllPlugins())if(item->uri()==Tone3000Preset::PLUGIN_URI){Tone3000Preset::InspectState(item->lv2State());tone=true;}
+        if(!tone)throw PiPedalArgumentException("Source has no complete saved TONE3000 rig.");
+        ordered.push_back(board.DeepCopy());
+    }
+    auto bank=Tone3000Performance::Prepare(request.name_,ordered);
+    const auto id=storage.SaveTone3000PerformanceBank(bank);
+    FireBanksChanged(clientId);
+    return Tone3000Performance::Result(id,bank);
+}
+
+/** Read fresh saved content/order; no current capture or recall.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4]
+ */
+Tone3000PerformanceResult PiPedalModel::GetTone3000PerformanceBank(int64_t bankId) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    const auto& entry=storage.GetBanks().getBankIndexEntry(bankId);
+    if(!entry.name().starts_with("TONE3000 Performance - "))throw PiPedalArgumentException("Choose a created performance bank.");
+    BankFile bank;storage.GetBankFile(bankId,&bank);return Tone3000Performance::Result(bankId,bank);
 }
 
 Tone3000LibraryResult PiPedalModel::GetTone3000Library()
@@ -2832,6 +3094,27 @@ Tone3000LibraryResult PiPedalModel::GetTone3000Library()
     }
     for (auto& source: sources) result.entries_.push_back(std::move(source.entry));
     return result;
+}
+
+/** Read only the saved bank; no live state capture, events or storage writes.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [7.1]
+ */
+Tone3000PreviewResult PiPedalModel::GetTone3000PresetPreview(const Tone3000PreviewRequest& request) try {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    Tone3000Library library(storage.GetDataRoot(),configuration.GetTone3000PresetRoots());
+    if (request.bankId_==-1 && request.presetId_==-1 && request.instanceId_==-1)
+        return library.Preview(request);
+    if (request.bankId_<0 || request.presetId_<0 || request.instanceId_<0)
+        throw PiPedalArgumentException("Preview requires a complete saved target identity.");
+    const auto& index=storage.GetBanks().getBankIndexEntry(request.bankId_);
+    if (!Tone3000Library::IsToneBank(index.name())) throw PiPedalArgumentException("Preview target must be a TONE3000 bank.");
+    BankFile bank; storage.GetBankFile(request.bankId_,&bank);
+    auto result=library.Preview(request,&bank.getItem(request.presetId_).preset());
+    result.active_=storage.GetBanks().selectedBank()==request.bankId_ && storage.GetCurrentPresetId()==request.presetId_;
+    result.hasUnsavedChanges_=result.active_ && hasPresetChanged;
+    return result;
+} catch(const std::filesystem::filesystem_error&) {
+    throw PiPedalStateException("Saved preview is unavailable; check storage permissions and refresh the library.");
 }
 
 /**
@@ -2946,7 +3229,7 @@ void PiPedalModel::DeleteMidiListeners(int64_t clientId)
     }
     if (audioHost)
     {
-        audioHost->SetListenForMidiEvent(midiEventListeners.size() != 0);
+        UpdateMidiListenFlags();
     }
 }
 
@@ -3059,7 +3342,8 @@ void PiPedalModel::OnNotifyMidiListen(uint8_t cc0, uint8_t cc1, uint8_t cc2)
         return; // Note off. Oopsie.
     }
     bool isControl = (cc0 & 0xF0) == 0xB0; // Control Change
-    if (!isNote && !isControl)
+    bool isProgram = (cc0 & 0xF0) == 0xC0 && cc1 < 128;
+    if (!isNote && !isControl && !isProgram)
     {
         return; // Not a note on or control change.
     }
@@ -3067,6 +3351,9 @@ void PiPedalModel::OnNotifyMidiListen(uint8_t cc0, uint8_t cc1, uint8_t cc2)
     for (int i = 0; i < midiEventListeners.size(); ++i)
     {
         auto &listener = midiEventListeners[i];
+        // Program observation is separate from legacy note/CC MIDI Learn.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4]
+        if(listener.programOnly != isProgram)continue;
         auto subscriber = this->GetNotificationSubscriber(listener.clientId);
         if (subscriber)
         {
@@ -3078,7 +3365,18 @@ void PiPedalModel::OnNotifyMidiListen(uint8_t cc0, uint8_t cc1, uint8_t cc2)
             --i;
         }
     }
-    audioHost->SetListenForMidiEvent(midiEventListeners.size() != 0);
+    UpdateMidiListenFlags();
+}
+
+/** Independent flags keep old MIDI Learn and passive PC observation isolated.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4]
+ */
+void PiPedalModel::UpdateMidiListenFlags() {
+    if(!audioHost)return;
+    bool learn=false,program=false;
+    for(const auto& listener:midiEventListeners){if(listener.programOnly)program=true;else learn=true;}
+    audioHost->SetListenForMidiEvent(learn);
+    audioHost->SetListenForMidiProgramEvent(program);
 }
 
 void PiPedalModel::ListenForMidiEvent(int64_t clientId, int64_t clientHandle)
@@ -3086,7 +3384,18 @@ void PiPedalModel::ListenForMidiEvent(int64_t clientId, int64_t clientHandle)
     std::lock_guard<std::recursive_mutex> lock(mutex);
     MidiListener listener{clientId, clientHandle};
     midiEventListeners.push_back(listener);
-    audioHost->SetListenForMidiEvent(true);
+    UpdateMidiListenFlags();
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4] */
+void PiPedalModel::ListenForMidiProgramEvent(int64_t clientId,int64_t clientHandle) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if(clientHandle<1||clientHandle>9007199254740991LL)throw PiPedalArgumentException("Invalid program listener handle.");
+    size_t count=0;for(const auto& listener:midiEventListeners)if(listener.clientId==clientId){
+        ++count;if(listener.clientHandle==clientHandle)throw PiPedalArgumentException("Listener already exists.");
+    }
+    if(count>=64)throw PiPedalArgumentException("Too many MIDI listeners.");
+    midiEventListeners.push_back({clientId,clientHandle,true});UpdateMidiListenFlags();
 }
 
 void PiPedalModel::CancelListenForMidiEvent(int64_t clientId, int64_t clientHandle)
@@ -3101,10 +3410,7 @@ void PiPedalModel::CancelListenForMidiEvent(int64_t clientId, int64_t clientHand
             break;
         }
     }
-    if (midiEventListeners.size() == 0)
-    {
-        audioHost->SetListenForMidiEvent(false);
-    }
+    UpdateMidiListenFlags();
 }
 
 void PiPedalModel::MonitorPatchProperty(int64_t clientId, int64_t clientHandle, uint64_t instanceId, const std::string &propertyUri)
@@ -3388,6 +3694,10 @@ void PiPedalModel::SetSelectedPedalboardPlugin(uint64_t clientId, uint64_t pedal
 
 bool PiPedalModel::LoadCurrentPedalboard()
 {
+    // Callers may already have assigned a desired snapshot/preset. Never capture
+    // the preceding runtime into that replacement during fallback cleanup.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
+    CancelTone3000StageJobs(-1, false);
     RegisterTone3000Intents();
     CrashGuardLock crashGuardLock;
     if (previousPedalboardLoaded && pedalboard.IsStructureIdentical(previousPedalboard))

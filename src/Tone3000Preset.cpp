@@ -87,6 +87,7 @@ JSON_MAP_REFERENCE(Tone3000StatePatch, calibrateInput)
 JSON_MAP_REFERENCE(Tone3000StatePatch, inputCalibrationLevel)
 JSON_MAP_REFERENCE(Tone3000StatePatch, osEnabled)
 JSON_MAP_REFERENCE(Tone3000StatePatch, osFactor)
+JSON_MAP_REFERENCE(Tone3000StatePatch, outputLevel)
 JSON_MAP_REFERENCE(Tone3000StatePatch, blocks)
 JSON_MAP_END()
 
@@ -654,6 +655,7 @@ namespace
                     if (!storedId || id < std::numeric_limits<int32_t>::min() || id > std::numeric_limits<int32_t>::max()
                         || !cacheIds.insert(id).second || !data || data->kind != 8 || data->binary.empty())
                         Fail("Invalid or duplicate TONE3000 embedded model");
+                    if (type == "nam") ++info.namCount; else ++info.irCount;
                     info.embeddedBytes += data->binary.size();
                     if (info.embeddedBytes > Tone3000Preset::MAX_BYTES) Fail("TONE3000 embedded-byte limit");
                     if (id == modelId) active = true;
@@ -1049,13 +1051,71 @@ Tone3000StateSummary Tone3000Preset::SummarizeState(const Lv2PluginState &state)
     return Summarize(StateTree(bytes));
 }
 
-/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [FR-13] [FR-14] [DES-OPERATE] [DES-STATE] [3.11] */
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [7.1] */
+Tone3000PresetInfo Tone3000Preset::InspectState(const Lv2PluginState &state)
+{
+    const auto bytes = Decode(state);
+    const auto tree = StateTree(bytes);
+    Tone3000PresetInfo result;
+    result.id = Text(tree, "activePresetId");
+    result.name = Text(tree, "activePresetName");
+    CheckSnapshot(*tree.Child("ChainSnapshot"), result);
+    return result;
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-25] [DES-STAGE-EXPORT] [7.11] */
+std::vector<uint8_t> Tone3000Preset::ExportPreset(const Lv2PluginState &state,
+                                               const std::string &rawId, const std::string &name)
+{
+    Identity(rawId, 512);
+    Identity(name, 512);
+    // Use a safe, portable identity independent of display name or source ID.
+    Stem(rawId + ".t3kpreset");
+    const auto bytes = Decode(state);
+    const auto tree = StateTree(bytes);
+    const auto parameters = ParameterValues(*tree.Child("PARAMETERS"), "PARAM");
+    Writer header;
+    header.String("T3KPresetHeader"); header.Compressed(2);
+    header.Text("id", rawId); header.Text("name", name); header.Compressed(0);
+    Writer out;
+    out.Raw(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>("T3KH"), 4));
+    for (size_t i = 0; i < 4; ++i) out.Byte(static_cast<uint8_t>(header.bytes.size() >> (8 * i)));
+    out.Raw(header.bytes);
+    out.String("T3KPreset"); out.Compressed(3);
+    out.Integer("schemaVersion", 1); out.Text("id", rawId); out.Text("name", name);
+    out.Compressed(2);
+    out.Raw(tree.Child("ChainSnapshot")->raw);
+    out.String("Params"); out.Compressed(0);
+    out.Compressed(std::count_if(PARAMETERS.begin(), PARAMETERS.end(), [](const auto& p) { return !p.session; }));
+    for (const auto& parameter : PARAMETERS)
+    {
+        if (parameter.session) continue;
+        const auto found = parameters.find(parameter.id);
+        const double value = found == parameters.end() ? parameter.initial : found->second;
+        out.String("Param"); out.Compressed(2);
+        out.Text("id", parameter.id); out.Number("value", value); out.Compressed(0);
+    }
+    // Validate the complete output before returning anything to the caller.
+    Parse(out.bytes, rawId + ".t3kpreset", "user");
+    return out.bytes;
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [FR-13] [DES-OPERATE] [3.11] */
+double Tone3000Preset::OutputLevel(const Lv2PluginState &state)
+{
+    const auto bytes=Decode(state); const auto tree=StateTree(bytes);
+    const auto parameters=ParameterValues(*tree.Child("PARAMETERS"),"PARAM");
+    const auto found=parameters.find("outputLevel");
+    return found==parameters.end() ? .5 : found->second;
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [DES-STAGE-BRIDGE] [7.6] */
 Lv2PluginState Tone3000Preset::EditState(const Lv2PluginState &state, const Tone3000StatePatch &patch)
 {
     const auto bytes = Decode(state);
     auto tree = StateTree(bytes);
     if (!patch.inputMode_ && !patch.calibrateInput_ && !patch.inputCalibrationLevel_
-        && !patch.osEnabled_ && !patch.osFactor_ && patch.blocks_.empty()) Fail("Empty TONE3000 state edit");
+        && !patch.osEnabled_ && !patch.osFactor_ && !patch.outputLevel_ && patch.blocks_.empty()) Fail("Empty TONE3000 state edit");
     if (patch.blocks_.size() > 256) Fail("Too many TONE3000 block edits");
     auto *snapshot = tree.Child("ChainSnapshot");
     if (patch.inputMode_)
@@ -1077,6 +1137,7 @@ Lv2PluginState Tone3000Preset::EditState(const Lv2PluginState &state, const Tone
     if (patch.inputCalibrationLevel_) SetParameter(tree, "inputCalibrationLevel", *patch.inputCalibrationLevel_);
     if (patch.osEnabled_) SetParameter(tree, "osEnabled", *patch.osEnabled_ ? 1 : 0);
     if (patch.osFactor_) SetParameter(tree, "osFactor", *patch.osFactor_);
+    if (patch.outputLevel_) SetParameter(tree, "outputLevel", *patch.outputLevel_);
     std::set<std::string> blockIds;
     for (const auto &edit : patch.blocks_)
     {

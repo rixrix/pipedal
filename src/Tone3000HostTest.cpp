@@ -9,6 +9,8 @@
 #include "RingBufferReader.hpp"
 #include "AesDigest.hpp"
 #include "json.hpp"
+#include "Tone3000Stage.hpp"
+#include "../tools/gig-rig/Tone3000StageBridge.hpp"
 #include "lv2/atom/util.h"
 #include "lv2/patch/patch.h"
 #include "lv2/lv2plug.in/ns/ext/buf-size/buf-size.h"
@@ -264,6 +266,52 @@ namespace pipedal
 }
 
 using namespace pipedal;
+
+/** Real Linux wrapper/handle/message-thread/timer gate with silent audio only.
+ * Silence must never qualify an owner measurement or produce a saved trim.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [DES-TEST] [7.5] [7.6]
+ */
+TEST_CASE("TONE3000 actual-host Stage bridge dispatch and silence rejection", "[.][gig_rig_stage]")
+{
+    PluginHost host;
+    auto info=PrepareHost(host);
+    auto item=MakeItem(*info);
+    NumericPatchProbe probe(host,info,item);
+    auto& effect=probe.Effect();
+    auto wait=[&](uint64_t token) {
+        const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(4);
+        while(std::chrono::steady_clock::now()<until) {
+            probe.EmptyBlock();
+            std::string raw;const auto count=effect.ReadTone3000Stage(token,raw);
+            REQUIRE(count>=0);
+            if(count>0) {
+                auto result=Tone3000Stage::Result(raw);
+                if(Tone3000Stage::Terminal(result))return result;
+            }
+        }
+        FAIL("Native Stage timer failed to finish in a headless LV2 host");
+        return json_variant();
+    };
+    std::string raw;
+    REQUIRE(effect.SubmitTone3000Stage(1,TONE3000_STAGE_RUNTIME,{})==0);
+    auto runtime=wait(1);
+    REQUIRE(runtime["state"].as_string()=="done");
+    REQUIRE(runtime["runtime"].is_object());
+    REQUIRE(effect.ReadTone3000Stage(99,raw)==TONE3000_STAGE_STALE);
+    REQUIRE(effect.SubmitTone3000Stage(1,TONE3000_STAGE_CANCEL,{})==0);
+    REQUIRE(effect.ReadTone3000Stage(1,raw)>0);
+    REQUIRE(Tone3000Stage::Result(raw)["state"].as_string()=="done");
+    REQUIRE(effect.SubmitTone3000Stage(2,TONE3000_STAGE_MEASURE_OUTPUT,"{\"seconds\":1}")==0);
+    auto measured=wait(2);
+    REQUIRE(measured["state"].as_string()=="done");
+    REQUIRE_FALSE(measured["valid"].as_bool());
+    REQUIRE(measured["silent"].as_bool());
+    REQUIRE(measured["samples"].as_number()==48000);
+    REQUIRE(effect.SubmitTone3000Stage(3,TONE3000_STAGE_MEASURE_OUTPUT,"{\"seconds\":10}")==0);
+    for(int i=0;i<32;++i)probe.EmptyBlock();
+    REQUIRE(effect.SubmitTone3000Stage(3,TONE3000_STAGE_CANCEL,{})==0);
+    REQUIRE(wait(3)["state"].as_string()=="cancelled");
+}
 
 /**
  * Hidden, opt-in device test. Use the service-equivalent HOME/XDG/LV2_PATH.

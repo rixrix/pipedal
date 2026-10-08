@@ -77,6 +77,7 @@ namespace pipedal
         std::optional<bool> calibrateInput_, osEnabled_;
         std::optional<double> inputCalibrationLevel_;
         std::optional<int> osFactor_;
+        std::optional<double> outputLevel_;
         std::vector<Tone3000BlockPatch> blocks_;
         DECLARE_JSON_MAP(Tone3000StatePatch);
     };
@@ -92,6 +93,8 @@ namespace pipedal
         bool legacy = false;
         size_t embeddedBytes = 0;
         size_t modelCount = 0;
+        // Cached assets, including disabled blocks and alternate model variants.
+        size_t namCount = 0, irCount = 0;
     };
 
     /**
@@ -129,6 +132,20 @@ namespace pipedal
          * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [FR-13] [DES-OPERATE] [DES-SEC] [3.11]
          */
         static Tone3000StateSummary SummarizeState(const Lv2PluginState &state);
+
+        /** Validated stored-state asset counts; never captures a running plugin.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [7.1]
+         */
+        static Tone3000PresetInfo InspectState(const Lv2PluginState &state);
+
+        /** Export a native user preset without standalone session preferences.
+         * Embedded snapshot/cache bytes are preserved exactly.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-25] [DES-STAGE-EXPORT] [7.11]
+         */
+        static std::vector<uint8_t> ExportPreset(const Lv2PluginState &state,
+                                               const std::string &rawId, const std::string &name);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.6] */
+        static double OutputLevel(const Lv2PluginState &state);
 
         /** Validate a sparse edit before producing a replacement full state.
          * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-12] [FR-13] [FR-14] [DES-OPERATE] [DES-STATE] [3.11]

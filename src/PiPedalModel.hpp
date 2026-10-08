@@ -47,6 +47,8 @@
 #include "Tone3000Tone.hpp"
 #include "Tone3000Operations.hpp"
 #include "AudioRecoveryPolicy.hpp"
+#include "Tone3000Performance.hpp"
+#include "Tone3000Stage.hpp"
 
 namespace pipedal
 {
@@ -176,6 +178,7 @@ namespace pipedal
         public:
             int64_t clientId;
             int64_t clientHandle;
+            bool programOnly=false;
         };
         class AtomOutputListener
         {
@@ -192,6 +195,7 @@ namespace pipedal
             LV2_URID propertyUrid;
         };
         void DeleteMidiListeners(int64_t clientId);
+        void UpdateMidiListenFlags();
         void DeleteAtomOutputListeners(int64_t clientId);
 
         std::vector<MidiListener> midiEventListeners;
@@ -268,6 +272,18 @@ namespace pipedal
         void RegisterTone3000Intents();
         void GuardTone3000PendingStates(bool requireCapture = true);
         PedalboardItem& CaptureTone3000Item(int64_t instanceId);
+        struct Tone3000StageJob {
+            int64_t clientId=-1, bankId=-1, presetId=-1, instanceId=-1;
+            uint64_t token=0; uint32_t command=0;
+            bool captured=false; json_variant result;
+            std::string savedRevision;
+            uint64_t postHandle=0;
+        };
+        uint64_t nextTone3000StageToken=0;
+        std::map<int64_t,Tone3000StageJob> tone3000StageJobs;
+        std::map<uint64_t,Tone3000StageJob> tone3000LevelMeasurements;
+        void CancelTone3000StageJobs(int64_t clientId=-1, bool retainCurrentState=true);
+        void ScheduleTone3000StagePoll(int64_t instanceId,uint64_t token);
 
     private: // IAudioHostCallbacks
         virtual void OnNotifyLv2StateChanged(uint64_t instanceId) override;
@@ -408,11 +424,22 @@ namespace pipedal
         void LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetInstanceId);
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
         Tone3000LibraryResult GetTone3000Library();
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4] */
+        Tone3000PerformanceSources GetTone3000PerformanceSources();
+        Tone3000PerformanceResult GetTone3000PerformanceBank(int64_t bankId);
+        Tone3000PerformanceResult CreateTone3000PerformanceBank(int64_t clientId,const Tone3000PerformanceRequest& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [7.1] */
+        Tone3000PreviewResult GetTone3000PresetPreview(const Tone3000PreviewRequest& request);
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
         Tone3000DefaultsResult GetTone3000Defaults();
         Tone3000DefaultsResult SetTone3000Defaults(const Tone3000DefaultsRequest& request);
         Tone3000CurrentStateResult GetTone3000CurrentState(const Tone3000CurrentStateRequest& request);
         bool SetTone3000CurrentState(int64_t clientId,const Tone3000CurrentStateEdit& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5] */
+        json_variant StartTone3000Stage(int64_t clientId,const Tone3000StageRequest& request);
+        json_variant PollTone3000Stage(int64_t clientId,const Tone3000StageRequest& request,bool cancel=false);
+        json_variant ApplyTone3000Level(int64_t clientId,uint64_t token,const std::string& expectedRevision,double targetRmsDb);
+        std::vector<uint8_t> ExportTone3000Preset(int64_t bankId,int64_t presetId,int64_t instanceId);
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
         Tone3000ImportResult ImportTone3000Preset(int64_t clientId, const Tone3000ImportRequest& request);
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
@@ -526,6 +553,7 @@ namespace pipedal
         void SetJackServerSettings(const JackServerSettings &jackServerSettings);
 
         void ListenForMidiEvent(int64_t clientId, int64_t clientHandle);
+        void ListenForMidiProgramEvent(int64_t clientId, int64_t clientHandle);
         void CancelListenForMidiEvent(int64_t clientId, int64_t clientHandle);
 
         void MonitorPatchProperty(int64_t clientId, int64_t clientHandle, uint64_t instanceId, const std::string &propertyUri);

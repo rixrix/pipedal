@@ -258,7 +258,10 @@ set (PIPEDAL_SOURCES
     Tone3000Library.hpp Tone3000Library.cpp
     Tone3000Defaults.hpp Tone3000Defaults.cpp
     Tone3000Operations.hpp Tone3000Operations.cpp
+    Tone3000Performance.hpp Tone3000Performance.cpp
     AudioRecoveryPolicy.hpp
+    Tone3000Stage.hpp Tone3000Stage.cpp
+    Tone3000BundleCheck.hpp Tone3000BundleCheck.cpp
     Tone3000Tone.hpp Tone3000Tone.cpp
     AesDigest.cpp AesDigest.hpp
     ChannelRouterSettings.cpp ChannelRouterSettings.hpp
@@ -412,6 +415,10 @@ set(PIPEDAL_LIBS libpipedald zip
 
 add_library(libpipedald STATIC ${PIPEDAL_SOURCES})
 
+# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-EXPORT] [7.11]
+add_executable(tone3000presettool EXCLUDE_FROM_ALL Tone3000PresetTool.cpp)
+target_link_libraries(tone3000presettool PRIVATE libpipedald ${PIPEDAL_LIBS})
+
 target_compile_definitions(libpipedald PUBLIC "_REENTRANT")
 
 target_include_directories(libpipedald PUBLIC ${PIPEDAL_INCLUDES})
@@ -508,7 +515,10 @@ add_executable(pipedaltest
     Tone3000PresetTest.cpp
     Tone3000LibraryTest.cpp
     Tone3000DefaultsTest.cpp
+    Tone3000PerformanceTest.cpp
     AudioRecoveryPolicyTest.cpp
+    Tone3000StageTest.cpp
+    Tone3000BundleCheckTest.cpp
 
 
     SystemConfigFile.hpp SystemConfigFile.cpp
@@ -521,9 +531,11 @@ add_executable(pipedaltest
 # -ffast-math. This changes only the probe, not production DSP compilation.
 set_property(SOURCE Tone3000HostTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
 # Uploaded preset validation must reject nonfinite numbers in release builds.
-# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.8]
-set_property(SOURCE Tone3000Preset.cpp Tone3000PresetTest.cpp Tone3000Defaults.cpp Tone3000DefaultsTest.cpp Tone3000Operations.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
-set_property(SOURCE AudioRecoveryPolicyTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
+# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [DES-STAGE] [3.8] [7.1]
+set_property(SOURCE Tone3000Preset.cpp Tone3000PresetTest.cpp Tone3000Library.cpp Tone3000LibraryTest.cpp Tone3000Defaults.cpp Tone3000DefaultsTest.cpp Tone3000Operations.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
+set_property(SOURCE Tone3000Performance.cpp Tone3000PerformanceTest.cpp AudioRecoveryPolicyTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
+set_property(SOURCE Tone3000Stage.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
+set_property(SOURCE Tone3000StageTest.cpp Tone3000BundleCheck.cpp Tone3000BundleCheckTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
 target_link_libraries(pipedaltest PRIVATE ${PIPEDAL_LIBS} ${ICU_LIBRARIES})
 target_include_directories(pipedaltest PRIVATE ${PIPEDAL_INCLUDES})
 

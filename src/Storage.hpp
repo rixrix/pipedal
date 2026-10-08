@@ -183,6 +183,8 @@ public:
      * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9]
      */
     Tone3000ImportResult SaveTone3000Preset(int64_t bankId, int64_t presetId, Pedalboard& board, int64_t instanceId);
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4] */
+    int64_t SaveTone3000PerformanceBank(BankFile& bank);
 
     
     bool LoadPreset(int64_t presetId);

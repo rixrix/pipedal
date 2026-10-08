@@ -1381,12 +1381,67 @@ public:
         Reply(replyTo,"setTone3000CurrentState",model.SetTone3000CurrentState(clientId,request));
     }
     REGISTER_MESSAGE_HANDLER(setTone3000CurrentState)
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5] */
+    void handle_startTone3000Stage(int replyTo,json_reader* reader) {
+        auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        Reply(replyTo,"startTone3000Stage",model.StartTone3000Stage(clientId,Tone3000Stage::Request(raw,false)));
+    }
+    REGISTER_MESSAGE_HANDLER(startTone3000Stage)
+    void handle_pollTone3000Stage(int replyTo,json_reader* reader) {
+        auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        Reply(replyTo,"pollTone3000Stage",model.PollTone3000Stage(clientId,Tone3000Stage::Request(raw,true)));
+    }
+    REGISTER_MESSAGE_HANDLER(pollTone3000Stage)
+    void handle_cancelTone3000Stage(int replyTo,json_reader* reader) {
+        auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        Reply(replyTo,"cancelTone3000Stage",model.PollTone3000Stage(clientId,Tone3000Stage::Request(raw,true),true));
+    }
+    REGISTER_MESSAGE_HANDLER(cancelTone3000Stage)
+    void handle_applyTone3000Level(int replyTo,json_reader* reader) {
+        const auto request=Tone3000Stage::LevelRequest(Tone3000Operations::ReadRequestJson(*reader));
+        Reply(replyTo,"applyTone3000Level",model.ApplyTone3000Level(clientId,request.token,request.revision,request.target));
+    }
+    REGISTER_MESSAGE_HANDLER(applyTone3000Level)
 
     void handle_getTone3000Library(int replyTo, json_reader *pReader)
     {
         this->Reply(replyTo,"getTone3000Library",model.GetTone3000Library());
     }
     REGISTER_MESSAGE_HANDLER(getTone3000Library)
+
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4] */
+    void handle_getTone3000PerformanceSources(int replyTo,json_reader*){
+        Reply(replyTo,"getTone3000PerformanceSources",model.GetTone3000PerformanceSources());
+    }
+    REGISTER_MESSAGE_HANDLER(getTone3000PerformanceSources)
+    void handle_getTone3000PerformanceBank(int replyTo,json_reader* reader){
+        const auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        Reply(replyTo,"getTone3000PerformanceBank",model.GetTone3000PerformanceBank(Tone3000Performance::BankId(raw)));
+    }
+    REGISTER_MESSAGE_HANDLER(getTone3000PerformanceBank)
+    void handle_createTone3000PerformanceBank(int replyTo,json_reader* reader){
+        const auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        Tone3000Performance::ValidateJson(raw);
+        std::istringstream stream(raw.to_string());json_reader checked(stream);Tone3000PerformanceRequest request;checked.read(&request);
+        Reply(replyTo,"createTone3000PerformanceBank",model.CreateTone3000PerformanceBank(clientId,request));
+    }
+    REGISTER_MESSAGE_HANDLER(createTone3000PerformanceBank)
+    void handle_listenForMidiProgramEvent(int replyTo,json_reader* reader){
+        const auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        model.ListenForMidiProgramEvent(clientId,Tone3000Performance::ProgramListenerHandle(raw));
+        Reply(replyTo,"listenForMidiProgramEvent",true);
+    }
+    REGISTER_MESSAGE_HANDLER(listenForMidiProgramEvent)
+
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [DES-SEC] [7.1] */
+    void handle_getTone3000PresetPreview(int replyTo,json_reader* reader) {
+        const auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        Tone3000Library::ValidatePreviewRequestJson(raw);
+        std::istringstream stream(raw.to_string()); json_reader checked(stream);
+        Tone3000PreviewRequest request; checked.read(&request);
+        Reply(replyTo,"getTone3000PresetPreview",model.GetTone3000PresetPreview(request));
+    }
+    REGISTER_MESSAGE_HANDLER(getTone3000PresetPreview)
 
     /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
     void handle_importTone3000Preset(int replyTo,json_reader* pReader)
