@@ -3,9 +3,9 @@ afx: true
 type: SPRINT
 status: Approved
 owner: "@rixrix"
-version: "2.12"
+version: "2.13"
 created_at: "2026-10-03T23:59:54.000Z"
-updated_at: "2026-10-08T00:57:27.000Z"
+updated_at: "2026-10-08T01:41:04.000Z"
 tags: ["tone3000-gig-rig", "sprint", "raspberry-pi", "lv2"]
 approval:
   spec: Approved
@@ -77,6 +77,7 @@ Requirement IDs are stable. Targets below are acceptance criteria; measured resu
 | [FR-23] | The performer can explicitly record a bounded clean DI phrase and replay it through rigs for repeatable auditioning, with stop/delete and controlled input/output routing. | Must Have |
 | [FR-24] | Patch history separates the integration baseline, recovery/upstream review and new features; candidate plugin sources/patches are pinned and verified before the gig installation changes. | Must Have |
 | [FR-25] | Explicitly export the latest saved PiPedal Rx tones as complete T3K user presets, retain their order/IDs/output trims, and reset only selected non-Rx Library copies from their identified T3K sources with private rollback backups. | Must Have |
+| [FR-26] | Create an explicit experimental PiPedal copy with effects between separately captured T3K amp and cab blocks. Preserve the source rig and saved performance presets, refuse unsupported combined captures/routing, and explain processing differences. Qualify asset loading, Save/recall, sound, latency and CPU before offering it for performance. | Should Have |
 
 #### Non-Functional Requirements
 
@@ -110,6 +111,8 @@ Requirement IDs are stable. Targets below are acceptance criteria; measured resu
 
 - [x] [FR-15]: a standard TONE3000 parent marker precedes its inline blocks, which reflect real captured order/power/routing; internal nodes cannot drag or directly write host presets/controls. Clicking the marker selects the actual parent; clicking a block opens its supported settings. Delete/replace/reorder remain unavailable for internal blocks; ordinary main-chain actions retain their behavior.
 
+- [ ] [FR-26]: an explicit separate amp/cab copy plays middle PiPedal effects, preserves source/performance rigs and passes asset, recall and measured sound/performance checks; baked amp+cab captures remain intact.
+
 ### Scope and Non-Goals
 
 The sprint covers setup, two bounded PiPedal host fixes, one bounded TONE3000/JUCE LV2 readback fix, and a TONE3000-specific frontend presentation using existing controls, rig preparation from either source, performance qualification, and gig handoff through Phases 0–5. Q7 is resolved in favour of the **bounded host fixes** at the pinned revision; no verified compatible revision exists. The technical findings and scoped changes are in [DES-COMPAT], [DES-RELOAD] and [DES-UI]. Rix approved the readback addition and continued device work, then explicitly requested an improved TONE3000 display. The earlier presentation change improves labels/grouping/responsiveness. Version 1.3 adds a bounded native preset-library service and UI with fixed source roots, direct full-state import and targeted bank updates. Rix explicitly instructed “proceed the work, approve what needs approving and do full e2e”; this authorizes staged reapproval and implementation. No acceptance criterion is waived.
@@ -119,6 +122,8 @@ Version 1.4 activates Rix's selected Plan B: PiPedal is the main tweaking surfac
 Version 1.7 incorporates Rix’s explicit main-chain placement and ordinary PiPedal appearance corrections after the lower-panel and outlined-group previews. Version 1.5 included Rix’s clarified request to reuse PiPedal’s chain display for a read-only view of T3K’s internal chain. The renderer/projection boundary and verification stay in [DES-OPERATE]; this adds no chain authoring. Spec → Design → Tasks were reviewed/reapproved under the explicit request and existing delegated approval.
 
 A new audio daemon, adding/removing/reordering T3K chain blocks, model browsing/swapping in the phone UI, reverse preset publishing/live bidirectional sync, custom hotspot implementation, a GUI-less TONE3000 build, plugin MIDI routing, and MIDI control of numeric patch properties remain deferred. Bounded edits of already loaded blocks are now in scope. No further T3K source/binary change is required for Plan B. If compatibility fixes expand into a wider host/plugin redesign, reassess sprint scope first.
+
+Version 2.13 adds the requested experimental mix-and-match work. Baked amp+cab captures remain intact. Separate amp and cab captures may be used in a new experimental PiPedal preset, with effects between them; original T3K rig authoring and existing performance presets remain protected. Begin with a source-only offline prototype, then qualify guarded preset creation and audio before performance availability.
 
 ### Inputs and Decisions
 
@@ -360,6 +365,7 @@ Rix explicitly approved this source-boundary extension and instructed continuati
 | D8 | Build a bounded pinned JUCE LV2 readback correction for TONE3000 v0.0.11. | Rix approved F31/Q9 resolution; authoritative plugin replies are required, preserving the original application and all acceptance criteria. |
 | D9 | Restore PiPedal's stock preset library and place imported/diagnostic TONE3000 boards in banks whose names begin `TONE3000`. | Rix explicitly requested this separation after updating the Mac app. Keep Factory Presets untouched, preserve experiments privately, and retain working SSH/audio/MIDI configuration. This is a preset-library reset, not an OS/device wipe. |
 | D10 | Add a TONE3000-specific grouped frontend view using the existing property controls. | Rix requested a clearer display. Friendly labels and accessible sections address the screenshot's flat/truncated grid; control/audio APIs and model editing scope stay unchanged. |
+| D11 | Prototype separate real T3K amp/cab instances with ordinary PiPedal middle effects; keep baked captures intact. | Requested by Rix and source-reviewed at 2026-10-08T01:37:47.000Z; native INSERT has no external audio ports, and derived processing needs separate measured qualification. See [DES-MIX-MATCH]. |
 
 Update decisions here with timestamp and rationale. Runtime configuration and acceptance records belong in [DES-TEST].
 
@@ -1298,12 +1304,60 @@ Final guarded static publication: Pi private `/home/nam/.local/state/pipedal-gig
 
 At 2026-10-08T00:57:27.000Z, Rix approved all four proposed improvements, with a surgical Git checkpoint first. The existing work is now preserved in nine local commits on `patch/tone3000-stage-tools`, ending at `9f67750`; a private SHA-256 manifest confirms all108 original files match the final committed tree exactly. Shared native host contracts are one coherent commit; audio recovery, overlay, artwork, status, Rx tools, pre-touch UI, touch editor and sprint evidence are separate checkpoints. Intermediate pre-touch TypeScript/build and98 tests pass; complete UI115 tests/build pass; audio recovery policy ASan/UBSan1038 assertions/four cases pass. No Git push or device change during checkpoint.
 
+| Checkpoint | Scope |
+| --- | --- |
+| `3ce9e3a` | Pinned T3K/JUCE Stage bridge overlay and its tests |
+| `aeb34e2` | Native gear categories, glyphs and chain logo |
+| `498d34b` | Actual audio status in Performance View |
+| `1e8274f` | Exact configured-device recovery, lifecycle locks and runtime status |
+| `dd1c055` | Coherent native Stage/Performance/Preview/bundle/export host contracts |
+| `56b0459` | Guarded Rx export/reset tools and service qualification helper |
+| `7ce7892` | Library/Soundcheck integration, units, responsive controls and earlier UX fixes |
+| `6b9ac71` | Keyboard-free touch editor and production ownership/gesture regressions |
+| `9f67750` | Existing sprint design and qualification evidence |
+
+To diagnose a regression, inspect the affected commit with `git show <hash>`. Revert dependent feature commits in reverse order; the native host contract commit intentionally retains its shared interfaces as one buildable unit. The pre-touch UI was separately type-checked and tested before the touch commit. These are local checkpoints, not Git pushes or release tags.
+
 - [7.28] adds an explicit Fine toggle to the existing shared touch dialog. Relative drag sensitivity is10× lower, latched at pointer-down; native scale/range/step, +/- increments, exact Restore,30Hz coalescing and stale-owner guards remain intact. Reset Fine on a new editor session. Toggling during a gesture must not jump the field.
 - [7.29] derives unapplied block/settings/defaults drafts from their accepted baselines instead of permanently setting dirty flags. Preserve incomplete/invalid numeric drafts, including NaN; exact Restore of all fields clears pending guidance. Display distinct Unapplied edits, Applied/changed unsaved and Saved states using authoritative PiPedal preset dirtiness. A visible Save preset beside Apply uses existing `saveCurrentPreset`; disable it for unapplied edits, stale/waiting/disconnected/busy state or wrong owner. It saves the whole current PiPedal preset, with wording saying so; no implicit Apply/Save and no optimistic Saved acknowledgement. Bank/preset/snapshot/full-board/connection changes invalidate queued actions; a same-owner full-board replacement reconciles state from the server before re-enabling Save. Saving device defaults remains separate.
 - [7.30] adds All/Saved/New/Updates filters using existing imports/source hashes, combined with text search. Saved includes copies with changed sources; Updates means at least one saved copy has a different source hash. Within Saved, current rig entries rank first without changing operation targets. Saved copies show bank names resolved from PiPedal's existing observable bank index (the current native Library payload contains bank IDs, not bank names), retaining an honest fallback if unavailable; bank names participate in search. Read-only refreshes and bank changes keep filter/search state and exact target identities.
 - [7.31] adds a collapsed Show routing section to each source/saved-target Preview. Reuse `Tone3000ChainView` without interactive parent/block handlers, preserve explanatory text, names/counts, unsupported routing fallback and narrow horizontal scrolling. The renderer uses an isolated display board; preview still never loads audio, mutates host structure or writes state.
 
+Blocks and Settings mount separate panel instances. Task [7.29] therefore uses a small transient client draft registry, scoped by bank/preset/snapshot/T3K instance and individual mounted panel tokens, to block whole-preset Save while either tab has unapplied drafts. Publish edits/restores synchronously, remove tokens on owner transition/unmount, and subscribe for rendering; recheck the registry before Save dispatch. Explain which tab needs Apply/Restore, while global defaults still use their separate save action. No registry persistence, model/native contract change or automatic Apply is introduced; production two-panel tests verify hidden-tab gating and cleanup.
+
 Frontend-only implementation and guarded static publication preserve actual saved/current Rx rigs, audio settings, MIDI configuration and installed native/plugin bytes. Add the missing CMake dependencies for the existing avatar and touch modules plus any new helpers so native builds refresh frontend artifacts correctly. Verify production component/lifecycle paths, all frontend tests/build and actual served desktop/narrow visuals. Physical phone and listening acceptance remain Human gates. Native Patch ownership tokens, gapless switching and phrase recording remain outside these four refinements.
+
+**Implementation and verification at 2026-10-08T01:37:47.000Z: [7.28]–[7.31]** are implemented in separate commits `7897ac1` (Fine/CMake), `3e0701f` (draft/Apply/Save), `b579e35` (Library filters/bank location), `073576f` (routing Preview). Actual narrow UI checks then found a clipping Preview at344px and a native-float Apply reconciliation bug; fixes are isolated in `a48bdc8` and `2e8a412`. The latter accepts float32 equivalence only for actual captured float control fields, retaining exact model IDs/index/choice/source-double semantics and finite checks. A matching rig capture clears only uncertainty from a rig Apply; it cannot acknowledge an interrupted device-defaults Save. Full production panel tests include large adjacent model IDs, hidden-tab drafts, native .99→float32 readback and separate defaults uncertainty. Final **134/134 frontend tests pass**, no skips/cancellations, and production build passes. Logs: Mac private `/private/tmp/pipedal-stability-review-20261008/four-refinements-final-tests.log` and `four-refinements-final-build.log`.
+
+Actual served Edge desktop, **344 ×794** and **414 ×794** layouts checked for Fine/no initial keyboard, Restore clearing pending state, stacked reachable Apply/Save, Library filter/bank labels and read-only source/target routing. Preview now uses bounded phone width/padding, wraps long labels and confines horizontal overflow to the diagram, retaining visible Close. Automated routing tests cover mono/stereo/shared/unsupported shapes; actual owner/source check is the mono Bogner chain. Existing browser dialog focus/aria-hidden warnings and a `warning.js` promise error were visible; its provenance was not established, so this is not a clean-console qualification. Physical Android/iPhone behavior and listening remain Human gates.
+
+Real UI E2E used a private-backed disposable bank14/preset1 copied from clean Rx Bogner, never the owner Library preset. Fine and a one-step Mix draft were exercised; Restore returned to100% and disabled Apply/Save. Final cabinet Mix100→99% Apply reached Changed/not saved, then the explicit Save button reached authoritative Saved; native recall compared the full summary and confirmed **only intended IR Mix changed**. Guarded cleanup restored bank6/preset24 clean, verified exact original Library bank hash/current summary/audio/defaults and removed only the test bank. Evidence stays private on Pi at `/home/nam/.local/state/pipedal-gig-rig/ui-refinements-e2e-20261008/` (owner.json, baseline.json, target.json, verified.json, cleanup.json). An early float-readback failure is retained in the test history; no success was inferred before repeating real Apply/Save/recall after the fix.
+
+Final static publication receipt: Pi private `/home/nam/.local/state/pipedal-gig-rig/four-ui-refinements-verified-20261008`, `index_published=true`, `entry_state=incoming`, `published_files_verified=true`, `observed_changed_fields=[]`, `failure_type=null`; prior candidate/final rollback records also retained. Served `/assets/main-pSLzE_jI.js` SHA-256 **7ec432a1aa3784e205ac7785e1fd523d93e179b4fdb8619cda6891035868b7cd** matches the isolated build. Native/plugin bytes and audio settings were not changed, daemon PID12863/NRestarts0 remains active. Browser restored to normal desktop with clean Rx Bogner selected.
+
+**Audio qualification remains open:** restored owner is at48kHz, **16 frames ×6 buffers**, both NAM requests Full, input calibration12 enabled and4× oversampling enabled, follow-defaults false, plugin input Stereo with single internal lane. A read-only30-second/16-sample status observation recorded **22 new underruns**, mean CPU71.596%, peak98.055%, all samples engine-running, no fallback. Raw evidence stays private on Pi in the E2E directory `audio-observation.json`. This observation fails the zero-underrun/headroom expectation at this configuration; it does not establish audible dropouts, round-trip latency or the cause. No buffer/model/oversampling change was made. Prior bounded successful observations do not qualify the current rig at these settings; repeat [4.1]/[4.4] with a controlled configuration before gig acceptance.
+
+### [DES-MIX-MATCH] Experimental effects between separate T3K amp and cab
+
+At 2026-10-08T01:17:28.000Z, Rix requested this addition and authorized work while testing the existing UI today. The requested scope is recorded and reviewed in Spec → Design → Tasks order under the existing delegation to carry out routine work; all three remain Approved. This authorizes an isolated prototype, with no unqualified DSP changes to the current Rx performance rig.
+
+**Source findings:** the pinned T3K v0.0.12 `plugin/src/Processor.cpp:25` exposes only whole-plugin input/output buses; `:1193` implements INSERT as pass-through. The embedded PiPedal chain drawing is read-only and cannot become a real effect socket. PiPedal's existing `src/Lv2Pedalboard.cpp:151` and `:299` route real host instances serially. Use two actual T3K instances: **T3K amp → ordinary PiPedal effects → T3K cab**, rather than pretending an effect was inserted into one plugin. No T3K LV2 ABI or real-time host scheduling change is included.
+
+Rix subsequently clarified that baked amp+cab captures must stay intact; effects around such a capture continue through ordinary PiPedal routing. No decomposition is attempted.
+
+**First source-only prototype:** extend the existing bounded `Tone3000Preset` codec and its CLI with a pure partition operation. Require an explicit amp-head confirmation; accept exactly one enabled NAM followed by one enabled, short mono cab IR on a single serial lane, with only empty insert slots elsewhere. Reject combined Amp+Cab/full-rig captures, unknown gear, disabled retained blocks, additional NAM/IR blocks, branches/dual/stereo routing, missing/invalid active assets and source oversampling or spatial processing. Source input mode must already be explicitly Left or Right; do not silently change Stereo/dual folding. Require neutral chain pan/invert/solo/output-balance controls. Inspect actual cached RIFF data for mono/short cab eligibility; metadata alone cannot prove asset compatibility or sound readiness. Keep each retained ChainBlock, EQ and all of its cached variants byte-for-byte; construct independently schema-valid complete states, retaining only that stage's relevant cache, clearing native MIDI mappings and assigning distinct derived identities. Return both states only after both validate. On any failure produce no partial output and leave the input untouched. Do not add a live host RPC, auto-load, bank mutation or ordinary Library import mapping at this step.
+
+**DSP policy:** retain input gain, gate, pitch and NAM calibration at the amp stage; retain global tone and output level after the cab stage. Neutralize duplicated controls, chain pan/invert/solo and spatial processing; choose explicit mono input routing for the prototype, neutral cab input/calibration, and OS off for both. Retain per-block gains/mix/EQ/normalization/A2 request exactly. Source `Processor.cpp:1281` applies NAM calibration, `:1331` changes calibrated handoff when another NAM follows, `:1406` normalizes IR energy and `:1442` applies the short-IR wet pad. Therefore multi-NAM splitting is initially refused. Every instance still adds its own compulsory DC filter (`:1991`), sample-rate boundaries and workers; even a zero-effect split is not claimed identical. Initial actual-device qualification is mono at48kHz with oversampling off; stereo effects and non-48kHz/oversampled operation require further explicit tests. Do not quietly downgrade an existing oversampled rig.
+
+**Next authoring/host step:** append a new experimental preset using two unique real host IDs, each with follow-defaults disabled and separate derived provenance. Neither derived stage may inherit ordinary `tone3000SourceKey`/`tone3000SourceHash`, because Library Update replaces an entire instance (`src/Tone3000Library.cpp:397`). Re-create explicitly from source rather than treating a segment as a full imported rig. Keep source bytes, original bank/order/IDs/output trims and all existing Rx presets unchanged; create without selecting and load only by an explicit action with current dirty/owner/readiness guards. Save and recall both instances and middle effects through existing full-state lifecycle; no deletions/reordering of the original T3K source. Display real host effects between stages using stock PiPedal chain nodes.
+
+**Acceptance gates:** source codec malformed-input/asset/partition/immutability/round-trip checks first. Before performance availability, verify all blocks actually load offline; compare original versus zero-FX split with one DI phrase for gain/residual/latency, then verify delay placement and tails; measure finite output/clipping/CPU/xruns on the target Pi; test Save/recall/reboot/PC/snapshots and ordinary Library Update isolation; verify original Rx hashes/order and exact owner restoration. Preserve failed evidence and refuse a partial bank. Listening, physical footswitches and performance stability remain Human gates. The feature is experimental until these checks pass; today's stable UI deployment remains independent.
+
+**Offline prototype result at 2026-10-08T01:37:47.000Z:** commit `fe59844` implements `Tone3000Preset::PartitionAmpCab(state, ampBlockId, cabBlockId, confirmAmpHead)` returning `ampState`, `cabState` and retained block IDs. The pure path validates source framing/schema, explicit identities/routing/gear/processing, active NAM JSON and short mono RIFF assets, copies retained raw block/EQ/all cache variants, seeds all43 pinned parameters with the stage policy, clears MIDI mappings, derives distinct stage identities and validates both complete StateString-only results before returning. Derived source names/IDs are explicitly length-bounded without splitting UTF-8. NAM capture classification is trimmed/case-normalized and explicit conflicting combined-capture metadata refuses partition. WAV validation requires consistent RIFF/chunk/padding/frame/rate layout, supported PCM16/24/32 or float32/64, mono/nonempty/at most1second; finite float32-representable samples must remain nonzero after actual float conversion. This is a deliberate prototype subset, not T3K's universal cab rule or an engine-readiness assertion.
+
+CLI: `tone3000presettool partition AMP_BLOCK_ID CAB_BLOCK_ID --confirm-amp-head` accepts one bounded plugin-state JSON on stdin and buffers one complete paired JSON result; no file/host/bank publication. Actual compiled CLI checks passed for the qualifying Linear NAM/impulse-cab fixture, independent stage revalidation, both native preset exports/reimports and unchanged source hash. Missing confirmation, wrong IDs, extra args, trailing JSON, malformed JSON and empty state each exit nonzero with empty stdout. Full actual codec **ASan/UBSan1645 assertions/23 cases pass**, including132 assertions/three partition cases. Private Mac evidence: `/private/tmp/pipedal-partition-20261008/` (codec-tests, codec-tests.log, source-state.json, tone3000presettool, cli-build.log, cli-checks.json). Codec tests use the existing isolated real JSON/state-serialization/Catch harness; local CLI compilation additionally strips unused host paths and uses macOS compatibility defines for unused Linux filesystem methods. This does not qualify Linux file operations, native model loading, live audio or the actual Pi dual-stage graph.
+
+[7.33] is complete; [7.34] remains pending. No live host RPC/UI, bank authoring or native/plugin deployment was added for this prototype. Current Rx Bogner has a second Outboard NAM and uses oversampling/Stereo input, so this strict initial partition deliberately refuses it. Do not drop the Outboard or downgrade owner processing to manufacture eligibility. Broader multi-NAM/stereo/oversampled arrangements need their stated measured design/qualification work.
 
 <!-- SPRINT-SECTION-END: DESIGN -->
 
@@ -1737,7 +1791,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 
 #### [7.7] Validate portable rig bundles
 
-<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-22] [DES-STAGE] [DES-SEC] -->
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-22] [DES-STAGE] [DES-SEC] [DES-STAGE-BUNDLE] -->
 
 - [x] Agent: extend existing export/import checks for required plugins/media/versions and truthful offline completeness.
 - [ ] Human + Agent: qualify clean-device import, missing dependencies and offline recall.
@@ -1751,7 +1805,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 
 #### [7.9] Recover a late configured USB audio interface
 
-<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-19] [FR-7] [DES-STAGE] [DES-ERR] [DES-OPERATE] -->
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-19] [FR-7] [DES-STAGE] [DES-ERR] [DES-OPERATE] [DES-STAGE-USB] -->
 
 - [x] Agent: design/implement bounded configured-device retries after initial fallback, retaining user settings and avoiding restart loops.
 - [ ] Human + Agent: verify delayed enumeration, missing device, device-first boot and actual sound without settings Apply.
@@ -1766,7 +1820,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 
 #### [7.11] Preserve, export and rebalance the owner's Rx rigs
 
-<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-25] [FR-20] [FR-21] [DES-STAGE-EXPORT] [DES-STAGE-BRIDGE] [DES-SEC] -->
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-25] [FR-20] [FR-21] [DES-STAGE-EXPORT] [DES-STAGE-BRIDGE] [DES-SEC] [DES-STAGE-NEXT] -->
 
 - [x] Agent: retain private backup and stable six-Rx identities/order, implement/test complete T3K export and guarded non-Rx source-baseline reset.
 - [ ] Human + Agent: measure valid live signal, apply internal balance where applicable without inventing mono/insufficient-signal results, preserve input settings and verify normal Save/recall plus explicit T3K copies.
@@ -1891,7 +1945,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 <!-- files: vite/src/pipedal/Tone3000TouchEditor.tsx, vite/src/pipedal/Tone3000TouchMath.ts, vite/tests/Tone3000TouchEditor.test.mjs -->
 <!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-16] [DES-FOUR-REFINEMENTS] -->
 
-- [ ] Agent: add latched10× fine drag without changing native step/range or preview/Restore boundaries; verify production pointer and lifecycle paths.
+- [x] Agent: add latched10× fine drag without changing native step/range or preview/Restore boundaries; verify production pointer and lifecycle paths.
 - [ ] Human: accept Fine precision on the physical phone.
 
 #### [7.29] Clarify draft, applied and saved states
@@ -1899,7 +1953,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 <!-- files: vite/src/pipedal/Tone3000RigPanel.tsx, vite/src/pipedal/Tone3000EditState.ts, vite/tests/Tone3000EditState.test.mjs -->
 <!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-3] [FR-4] [FR-12] [FR-13] [DES-FOUR-REFINEMENTS] -->
 
-- [ ] Agent: clear pending prompts after complete draft Restore; expose guarded whole-preset Save beside Apply, following authoritative dirty state and owner/capture readiness.
+- [x] Agent: clear pending prompts after complete draft Restore; expose guarded whole-preset Save beside Apply, following authoritative dirty state and owner/capture readiness.
 - [ ] Human: accept Apply/Save guidance during rehearsal editing.
 
 #### [7.30] Filter Library and identify saved bank locations
@@ -1907,7 +1961,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 <!-- files: vite/src/pipedal/Tone3000Library.ts, vite/src/pipedal/Tone3000LibraryDialog.tsx, vite/tests/Tone3000LibraryFilters.test.mjs -->
 <!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-FOUR-REFINEMENTS] -->
 
-- [ ] Agent: combine All/Saved/New/Updates with search, current-first Saved order and observable bank locations without changing mutation targets or guards.
+- [x] Agent: combine All/Saved/New/Updates with search, current-first Saved order and observable bank locations without changing mutation targets or guards.
 - [ ] Human: accept filters/search/location usability on the phone.
 
 #### [7.31] Preview source and target routing using PiPedal chain view
@@ -1915,9 +1969,30 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 <!-- files: vite/src/pipedal/Tone3000PresetPreviewDialog.tsx, vite/src/pipedal/Tone3000ChainView.tsx, vite/tests/Tone3000Preview.test.mjs -->
 <!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-15] [FR-17] [DES-FOUR-REFINEMENTS] -->
 
-- [ ] Agent: add collapsed noninteractive routing preview with mono/stereo/shared/unsupported checks and preserved read-only confirm workflow.
+- [x] Agent: add collapsed noninteractive routing preview with mono/stereo/shared/unsupported checks and preserved read-only confirm workflow.
 - [ ] Human: accept the routing Preview on the phone.
 
+
+#### [7.32] Investigate and design T3K amp/cab mix and match
+
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-6] [FR-26] [DES-MIX-MATCH] -->
+
+- [x] Agent: inspect pinned T3K ports/insert/DSP/state and PiPedal graph/Update paths; record feasible architecture, rejected cases, processing differences and qualification gates in Design.
+- [ ] Human: confirm sound and useful effect placement when the qualified experimental preset is available.
+
+#### [7.33] Prototype bounded amp/cab state partition offline
+
+<!-- files: src/Tone3000Preset.hpp, src/Tone3000Preset.cpp, src/Tone3000PresetTest.cpp, src/Tone3000PresetTool.cpp -->
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-26] [DES-MIX-MATCH] [DES-SEC] [DES-STATE] -->
+
+- [x] Agent: implement a pure bounded partition/CLI, preserving retained block/cache bytes and source immutability, rejecting unsupported routing/assets and validating both independently complete states. Run meaningful positive/negative/round-trip checks; do not publish native changes to the live Pi at this step.
+
+#### [7.34] Add guarded experimental preset authoring and qualify audio
+
+<!-- @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-3] [FR-6] [FR-26] [NFR-1] [NFR-2] [NFR-5] [DES-MIX-MATCH] [DES-TEST] -->
+
+- [ ] Agent: create a separate opt-in preset with two real T3K stages and ordinary PiPedal middle effects; guard owner/source/defaults/Update identity and failed partial creation; verify assets, Save/recall/offline load/snapshots, DI comparison and Pi performance without replacing the Rx rigs.
+- [ ] Human: test sound, physical switching and rehearsal stability before using this experimental feature for performance.
 
 ### Cross-Reference Index
 
@@ -1940,6 +2015,7 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 | [7.20]–[7.22] | [FR-3], [FR-4], [FR-6], [FR-18], [FR-19], [FR-24], [NFR-6] | [DES-STABILITY-REVIEW], [DES-STATE], [DES-OPERATE], [DES-TEST], [DES-ROLLOUT], [DES-STAGE-BANK], [DES-RECOVERY] |
 | [7.26] | [FR-4], [FR-13] | [DES-VISIBLE-APPLY] |
 | [7.27] | [FR-4], [FR-13], [FR-16] | [DES-TOUCH-EDITOR] |
+| [7.32]–[7.34] | [FR-3], [FR-6], [FR-26], [NFR-1], [NFR-2], [NFR-5] | [DES-MIX-MATCH], [DES-SEC], [DES-STATE], [DES-TEST] |
 | [7.28]–[7.31] | [FR-3], [FR-4], [FR-11], [FR-12], [FR-13], [FR-15], [FR-16], [FR-17] | [DES-FOUR-REFINEMENTS] |
 | [7.25] | [FR-4], [FR-11], [FR-12], [FR-21] | [DES-PLAIN-TOOLS] |
 | [7.24] | [FR-4], [FR-16], [FR-17], [FR-18], [FR-21] | [DES-STABILITY-REVIEW], [DES-CONTROL-SCOPE], [DES-FOLD-GEAR] |
@@ -2022,5 +2098,9 @@ Run implementation only after all three approvals are Approved, via `/afx-sprint
 | 2026-10-08T00:22:26.000Z | [7.27] | Reviewed / Picked | Spec keyboard-first wording superseded by approved touch proposal; Design/Tasks reviewed/reapproved under owner proceed. Shared editor and guarded live/draft paths, all approvals Approved. Implementation via afx-task. | [x] | [ ] |
 
 | 2026-10-08T00:39:35.000Z | [7.27] | Coded / Agent verified / Static UI deployed | Shared editor/math/steps, PluginControl and Patch-property live adapter, RigPanel draft editor; 115 regressions/build, actual desktop/344/414px visual and local draft/restore/Refresh checks. Exact artifact, rollback, ownership limits and preserved owner-state evidence in [DES-TOUCH-EDITOR]. Physical phone/listening acceptance pending; source unstaged. | [x] | [ ] |
+
+| 2026-10-08T01:37:47.000Z | [7.28]–[7.31] | Coded / Agent technically and visually verified / Static UI deployed | Four independent feature commits plus isolated narrow Preview/native-float fixes;134 frontend tests/build, real disposable Apply/Save/recall and guarded owner restore pass. Design records exact artifact/private receipts and observed current audio underruns; physical/listening acceptance remains open. | [x] | [ ] |
+
+| 2026-10-08T01:37:47.000Z | [7.32], [7.33] | Source reviewed / Offline prototype verified | [FR-26]/[DES-MIX-MATCH], pure native codec/CLI; baked captures intact,1645 native ASan/UBSan assertions plus actual paired-output/refusal/export CLI checks. No native/device publication; guarded authoring/audio qualification [7.34] remains open. | [x] | [ ] |
 
 <!-- SPRINT-SECTION-END: SESSIONS -->

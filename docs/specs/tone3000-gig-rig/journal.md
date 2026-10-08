@@ -320,3 +320,17 @@ Compact keyboard-free T3K readout editor with relative slider, finite native sca
 ### 2026-10-08T00:57:27.000Z — Surgical checkpoint and four refinements approved
 
 Rix explicitly authorizes focused local commits before the four proposed UI improvements. Nine checkpoints preserve all108 original files exactly, ending at9f67750 onpatch/tone3000-stage-tools, with clean index/worktree and no Git push. Intermediate pre-touch98 tests/TypeScript and complete115 tests/build pass; audio recovery policy sanitizer checks pass. Technical commit boundaries and approved Fine/edit-save/filter/routing scope are recorded in [DES-FOUR-REFINEMENTS], tasks7.28–7.31. Spec remains Approved; Design and Tasks reviewed/reapproved under explicit all-four authorization. Further work will be separate commits; no checkpoint device mutation.
+
+### 2026-10-08T01:17:28.000Z — Internal amp/cab mix and match requested
+
+Rix requested adding PiPedal effects between T3K amp and cab while testing the stable UI today. Two read-only source audits confirmed INSERT pass-through and no native external send/return. Added [FR-26], [DES-MIX-MATCH] and stable tasks [7.32]–[7.34]; reviewed Spec → Design → Tasks under existing delegated implementation scope. Begin with a pure offline two-state partition and strict separate NAM amp/mono IR cab eligibility. Existing Rx/source/native installation remains protected; no audio-equivalence or performance acceptance until measured.
+
+### 2026-10-08T01:37:47.000Z — Four UI refinements qualified; offline mix-and-match prototype checkpointed
+
+Fine, draft/Apply/Save, Library filters/bank labels and routing Preview are separately committed and statically deployed. Actual narrow checks found344px Preview clipping and float32 native readback causing a false stale draft; isolated fixes and134 frontend tests/build pass. Real disposable cabinet Mix Apply/Save/recall confirms only intended change, then exact guarded owner Library/audio/defaults restore and test bank removal pass. [DES-FOUR-REFINEMENTS] holds artifact/private evidence and limits. Read-only current48kHz/16×6/4×OS/two-Full-NAM observation has22 new underruns in30s, mean71.596% CPU/peak98.055%; no audio configuration changed and gig qualification remains open.
+
+Rix clarified baked amp+cab captures remain intact. [7.32]/[7.33] complete offline in `fe59844`: explicit separate amp/cab codec/CLI, raw retained assets/settings, strict mono routing/processing/RIFF/NAM guards, both validated states buffered before output. ASan/UBSan1645 assertions/23cases and actual CLI success/seven empty-output refusals/export/reimport/source-hash checks pass. [7.34] live authoring/DI/native readiness/performance qualification remains pending; current owner Rig is intentionally ineligible for this strict first prototype. All approvals remain Approved under the documented delegated scope.
+
+### 2026-10-08T01:41:04.000Z — Sprint traceability verification
+
+Corrected three existing missing task references for Stage roadmap, bundle and USB design sections. All32 requirement anchors,40 design anchors and89 parseable task groups are unique and covered; each task retains canonical sprint references. All three approvals remain Approved, with Human audio/rehearsal gates open. Offline codec evidence log refreshed to match the final1645-assertion binary.
