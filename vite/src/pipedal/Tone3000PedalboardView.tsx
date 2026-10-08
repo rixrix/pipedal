@@ -18,10 +18,11 @@ type Entry = {
 /** Capture real host instances for their read-only main-chain groups. No display
  * ID reaches a model setter, and ordinary host graph actions keep their IDs.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-OPERATE] [3.15]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LANDSCAPE] [7.38]
  */
 export default function Tone3000PedalboardView(props: {
     selectedId?: number; onSelectionChanged?: (id: number) => void;
-    onDoubleClick?: (id: number) => void; hasTinyToolBar: boolean; enableStructureEditing: boolean;
+    onDoubleClick?: (id: number) => void; readOnly?: boolean; hasTinyToolBar: boolean; enableStructureEditing: boolean;
 }) {
     const model = PiPedalModelFactory.getInstance();
     const focused = useSyncExternalStore(subscribeTone3000BlockFocus, getTone3000BlockFocus);
@@ -126,6 +127,7 @@ export default function Tone3000PedalboardView(props: {
         };
     }, [model]);
     return <PedalboardView {...props} tone3000Chains={chains}
-        onTone3000ParentClick={clearTone3000BlockFocus}
-        tone3000FocusedBlock={focused?.instanceId === props.selectedId ? focused : undefined} onTone3000BlockClick={focusTone3000Block} />;
+        onTone3000ParentClick={props.readOnly ? undefined : clearTone3000BlockFocus}
+        tone3000FocusedBlock={!props.readOnly && focused?.instanceId === props.selectedId ? focused : undefined}
+        onTone3000BlockClick={props.readOnly ? undefined : focusTone3000Block} />;
 }

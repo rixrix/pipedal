@@ -84,3 +84,21 @@
         flex-shrink: 0;
     }
 }
+
+/* View preference only; mounted controls remain hidden until the owner returns.
+   @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-15] [DES-LANDSCAPE] [7.38] */
+.t3k-chain-only.t3k-chain-only {
+    overflow: hidden;
+}
+.t3k-chain-only #pedalboardScroll {
+    flex: 1 1 auto !important;
+    max-height: none !important;
+    min-height: 0;
+}
+.t3k-chain-only #mainPageControls,
+.t3k-chain-only .t3k-editor-toolbar > div > :not(.t3k-chain-toggle) {
+    display: none !important;
+}
+.t3k-chain-only .t3k-editor-toolbar > div {
+    justify-content: flex-end !important;
+}

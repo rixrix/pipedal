@@ -129,6 +129,7 @@ interface MainState {
     selectedSnapshot: number;
     loadDialogOpen: boolean;
     tone3000LibraryOpen: boolean;
+    tone3000ChainOnly: boolean;
     snapshotDialogOpen: boolean;
     pedalboard: Pedalboard;
     addMenuAnchorEl: HTMLElement | null;
@@ -146,6 +147,9 @@ interface MainState {
 }
 
 
+/** Local landscape display preference never changes audio or saved state.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-15] [DES-LANDSCAPE] [7.38]
+ */
 export const MainPage =
     withTheme(
         withStyles(
@@ -179,6 +183,7 @@ export const MainPage =
                         selectedSnapshot: -1,
                         loadDialogOpen: false,
                         tone3000LibraryOpen: false,
+                        tone3000ChainOnly: false,
                         snapshotDialogOpen: false,
                         displayNameDialogOpen: false,
                         pedalboard: pedalboard,
@@ -673,24 +678,27 @@ export const MainPage =
                     // A tabbed T3K editor needs the remaining height on folded/landscape phones.
                     // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [7.14]
                     const tone3000Panel = pluginUri === "https://www.tone3000.com/plugin";
+                    const chainViewAvailable = this.windowSize.width > this.windowSize.height;
+                    const chainOnly = chainViewAvailable && this.state.tone3000ChainOnly;
                     const t3kViewport = tone3000ViewportStyles(this.state.screenHeight, horizontalScrollLayout);
 
                     // Keep the short-screen scroll owner explicit; the T3K stylesheet releases its nested fixed heights.
                     // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [7.14]
                     return (
-                        <div className={classes.frame + (tone3000Panel && horizontalScrollLayout ? " t3k-landscape" : "")}>
+                        <div className={classes.frame + (tone3000Panel && horizontalScrollLayout ? " t3k-landscape" : "") + (chainOnly ? " t3k-chain-only" : "")}>
                             <div id="pedalboardScroll" className={horizontalScrollLayout ? classes.pedalboardScrollSmall : classes.pedalboardScroll}
                                 style={tone3000Panel ? t3kViewport.chain
                                     : { maxHeight: horizontalScrollLayout ? undefined : this.state.screenHeight / 2 }}>
-                                <PedalboardView key={pluginUri} selectedId={this.state.selectedPedal}
-                                    enableStructureEditing={this.props.enableStructureEditing}
+                                <PedalboardView key={pluginUri} selectedId={chainOnly ? undefined : this.state.selectedPedal}
+                                    readOnly={chainOnly}
+                                    enableStructureEditing={this.props.enableStructureEditing && !chainOnly}
                                     onSelectionChanged={this.onSelectionChanged}
                                     onDoubleClick={this.onPedalDoubleClick}
                                     hasTinyToolBar={this.props.hasTinyToolBar}
                                 />
                             </div>
                             <div className={classes.separator} />
-                            <div className={classes.controlToolBar}>
+                            <div className={classes.controlToolBar + " t3k-editor-toolbar"}>
                                 <div style={{
                                     display: "flex", flexFlow: "row nowrap", alignItems: "center", justifyContent: "center", minWidth: 0,
                                     width: "100%", height: 48, paddingLeft: 16, paddingRight: 16,
@@ -711,6 +719,15 @@ export const MainPage =
                                     <div style={{ flex: "1 1 1px" }}>
 
                                     </div>
+                                    {chainViewAvailable && <div className="t3k-chain-toggle" style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 8 }}>
+                                        {chainOnly && <Typography variant="caption" color="text.secondary">Chain view · Read only</Typography>}
+                                        <ButtonEx tooltip={chainOnly ? "Return to controls; your edits are kept" : "Show the chain without editing controls"}
+                                            aria-label={chainOnly ? "Show controls" : "Show chain only"} aria-pressed={chainOnly}
+                                            style={{ minHeight: 44, textTransform: "none", padding: "6px 12px", borderRadius: 4 }}
+                                            onClick={() => this.setState({ tone3000ChainOnly: !chainOnly })}>
+                                            {chainOnly ? "Controls" : "Chain only"}
+                                        </ButtonEx>
+                                    </div>}
                                     {/* @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY-TOOLBAR] [7.19] */}
                                     {tone3000Panel && <div style={{ flex: "0 0 auto" }}>
                                         {this.windowSize.width < SPLIT_CONTROLBAR_THRESHHOLD
@@ -793,7 +810,7 @@ export const MainPage =
                                 </div>
                             </div>
                             {
-                                this.state.splitControlBar && this.props.enableStructureEditing && (
+                                this.state.splitControlBar && this.props.enableStructureEditing && !chainOnly && (
                                     <div className={classes.splitControlBar}>
                                         {
                                             this.titleBar(pedalboardItem, canShowModUi)
@@ -801,7 +818,7 @@ export const MainPage =
                                     </div>
                                 )
                             }
-                            <div id="mainPageControls" className={horizontalScrollLayout ? classes.controlContentSmall : classes.controlContent}
+                            <div id="mainPageControls" hidden={chainOnly} className={horizontalScrollLayout ? classes.controlContentSmall : classes.controlContent}
                                 style={tone3000Panel ? t3kViewport.controls : undefined}>
                                 {
                                     missing ? (

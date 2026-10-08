@@ -1325,13 +1325,14 @@ const PedalboardView =
                                     <Tone3000ChainView summary={captured.summary!} embedded
                                         parent={{ pluginType: item.pluginType, selected: hostId === this.props.selectedId,
                                             onClick: () => {
+                                                if (this.isReadOnly()) return;
                                                 this.setSelection(hostId);
                                                 this.props.onTone3000ParentClick?.();
                                             } }}
                                         focusedBlockId={hostId === this.props.selectedId && this.props.tone3000FocusedBlock?.instanceId === hostId
                                             ? this.props.tone3000FocusedBlock.blockId : undefined}
                                         onLayout={layout => this.onTone3000Layout(hostId, layout)}
-                                        onBlockClick={this.props.onTone3000BlockClick ? blockId => {
+                                        onBlockClick={!this.isReadOnly() && this.props.onTone3000BlockClick ? blockId => {
                                             this.setSelection(hostId);
                                             this.props.onTone3000BlockClick!(hostId, blockId);
                                         } : undefined} />
@@ -1562,11 +1563,14 @@ const PedalboardView =
                  */
                 isReadOnly(): boolean { return this.props.readOnly === true || this.props.displayBoard !== undefined; }
                 private renderKey: number = 0;
+                /** Live read-only boards retain T3K captures; synthetic previews use only their local display data.
+                 * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-LANDSCAPE] [7.38]
+                 */
                 render() {
                     const classes = withStyles.getClasses(this.props);
                     this.renderKey = 0;
                     let layoutChain = makeChain(this.model, (this.props.displayBoard ?? this.state.pedalboard)?.items,
-                        this.props.displayNodes, this.isReadOnly() ? undefined : this.props.tone3000Chains);
+                        this.props.displayNodes, this.props.displayBoard ? undefined : this.props.tone3000Chains);
                     let start = PedalLayout.Start();
                     let end = PedalLayout.End();
                     if (layoutChain.length !== 0) {
