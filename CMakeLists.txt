@@ -53,6 +53,13 @@ add_subdirectory("src")
 set (VITE_BUILD_DIRECTORY ${PROJECT_SOURCE_DIR}/vite/dist/)
 
 
+# Optional independent bundle, built only from explicitly pinned local dependencies.
+# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-27] [DES-PITCH-LV2] [7.35]
+option(PIPEDAL_BUILD_T3K_PITCH "Build the standalone experimental T3K Pitch LV2 bundle" OFF)
+if(PIPEDAL_BUILD_T3K_PITCH)
+    add_subdirectory(tools/gig-rig/pitch-lv2)
+endif()
+
 # install
 
 

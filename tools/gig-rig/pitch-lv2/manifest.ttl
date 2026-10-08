@@ -1,0 +1,6 @@
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+<https://github.com/rixrix/pipedal/plugins/t3k-pitch#mono> a lv2:Plugin ;
+    lv2:binary <t3k_pitch.so> ; rdfs:seeAlso <pitch.ttl> .
+<https://github.com/rixrix/pipedal/plugins/t3k-pitch#stereo> a lv2:Plugin ;
+    lv2:binary <t3k_pitch.so> ; rdfs:seeAlso <pitch.ttl> .
