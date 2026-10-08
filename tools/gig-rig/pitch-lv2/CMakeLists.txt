@@ -6,6 +6,10 @@ include(GNUInstallDirs)
 # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-27] [DES-PITCH-LV2] [7.35]
 set(PIPEDAL_PITCH_JUCE_SOURCE "" CACHE PATH "Existing JUCE 9.0.3 checkout (never downloaded)")
 set(PIPEDAL_PITCH_REFERENCE_SOURCE "" CACHE PATH "Pinned TONE3000 v0.0.12 checkout for independent DSP tests")
+# LV2 discovery uses lib/lv2 even when GNUInstallDirs selects a multiarch libdir.
+# Explicit overrides may be prefix-relative or absolute; do not change the global library policy.
+# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-27] [DES-PITCH-LV2] [7.35]
+set(PIPEDAL_PITCH_LV2_INSTALL_DIR "lib/lv2" CACHE PATH "LV2 bundle directory (relative to CMAKE_INSTALL_PREFIX unless absolute)")
 if(NOT EXISTS "${PIPEDAL_PITCH_JUCE_SOURCE}/CMakeLists.txt")
     message(FATAL_ERROR "Set PIPEDAL_PITCH_JUCE_SOURCE to an existing JUCE 9.0.3 checkout")
 endif()
@@ -52,9 +56,9 @@ foreach(file manifest.ttl pitch.ttl NOTICE vendor/TONE3000-LICENSE vendor/JUCE-L
     get_filename_component(name "${file}" NAME)
     configure_file("${file}" "${bundle}/${name}" COPYONLY)
 endforeach()
-install(TARGETS t3k_pitch LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/lv2/T3KPitch.lv2")
+install(TARGETS t3k_pitch LIBRARY DESTINATION "${PIPEDAL_PITCH_LV2_INSTALL_DIR}/T3KPitch.lv2")
 install(FILES manifest.ttl pitch.ttl NOTICE vendor/TONE3000-LICENSE vendor/JUCE-LICENSE.md
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/lv2/T3KPitch.lv2")
+    DESTINATION "${PIPEDAL_PITCH_LV2_INSTALL_DIR}/T3KPitch.lv2")
 
 if(BUILD_TESTING)
     if(NOT EXISTS "${PIPEDAL_PITCH_REFERENCE_SOURCE}/plugin/src/PitchShift.cpp")
