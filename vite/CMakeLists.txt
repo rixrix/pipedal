@@ -225,6 +225,7 @@ add_custom_command(
     src/pipedal/Tone3000MobileLayout.ts
     public/TONE3000-GEAR-LICENSE.txt
     src/pipedal/svg/tone3000/LICENSE
+    src/pipedal/svg/tone3000/t3k-avatar.png
     src/pipedal/svg/tone3000/amp-cab.svg
     src/pipedal/svg/tone3000/amp.svg
     src/pipedal/svg/tone3000/cab.svg
@@ -236,6 +237,10 @@ add_custom_command(
     src/pipedal/svg/tone3000/space.svg
     # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.3]
     src/pipedal/Tone3000ControlUnits.ts
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOUR-REFINEMENTS] [7.28] [7.29]
+    src/pipedal/Tone3000TouchEditor.tsx
+    src/pipedal/Tone3000TouchMath.ts
+    src/pipedal/Tone3000TouchSettings.ts
     # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.10]
     src/pipedal/Tone3000Library.ts
     src/pipedal/Tone3000LibraryDialog.tsx

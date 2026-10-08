@@ -28,11 +28,12 @@ export interface Tone3000TouchEditorProps extends Tone3000TouchScale {
     onClose: () => void;
 }
 
-type Gesture = { pointer: number; x: number; width: number; start: number; element: HTMLDivElement; changed: boolean; previewed: boolean };
+type Gesture = { pointer: number; x: number; width: number; sensitivity: number; start: number; element: HTMLDivElement; changed: boolean; previewed: boolean };
 
 /** Keyboard-free adjustment with relative drag and owned, coalesced previews.
  * All transport and local-draft guards remain in the owning control callbacks.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-13] [FR-16] [DES-TOUCH-EDITOR] [7.27]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOUR-REFINEMENTS] [7.28]
  */
 export default function Tone3000TouchEditor(props: Tone3000TouchEditorProps) {
     const live = useRef(props); live.current = props;
@@ -41,6 +42,7 @@ export default function Tone3000TouchEditor(props: Tone3000TouchEditorProps) {
     if (lifecycle.current.key !== ownerKey) lifecycle.current = { key: ownerKey, generation: lifecycle.current.generation + 1 };
     const generation = lifecycle.current.generation;
     const [shown, setShown] = useState(props.value), [typing, setTyping] = useState(false), [text, setText] = useState("");
+    const [fine, setFine] = useState(false);
     const current = useRef(props.value), baseline = useRef(props.value), gesture = useRef<Gesture | null>(null);
     const echoes = useRef<number[]>([]), timer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const queued = useRef<number | null>(null), lastPreview = useRef(-Infinity), alive = useRef(false);
@@ -90,7 +92,7 @@ export default function Tone3000TouchEditor(props: Tone3000TouchEditorProps) {
     useEffect(() => {
         clearPreview(); release(); scope.current = props.scopeKey;
         baseline.current = props.value; echoes.current = []; lastPreview.current = -Infinity;
-        show(props.value); setTyping(false); setText("");
+        show(props.value); setTyping(false); setText(""); setFine(false);
         return () => { clearPreview(); release(); };
     }, [props.open, props.scopeKey, props.label, props.min, props.max, props.step]);
     useEffect(() => {
@@ -105,7 +107,7 @@ export default function Tone3000TouchEditor(props: Tone3000TouchEditorProps) {
         const active = gesture.current;
         if (!active || active.pointer !== event.pointerId || !allowed()) return;
         event.preventDefault(); event.stopPropagation();
-        const next = tone3000TouchDrag(active.start, event.clientX - active.x, active.width, live.current);
+        const next = tone3000TouchDrag(active.start, (event.clientX - active.x) * active.sensitivity, active.width, live.current);
         if (Number.isFinite(next) && next !== current.current) { active.changed = true; show(next); preview(next); }
     };
     const range = tone3000TouchRange(shown, props), valid = Number.isFinite(range) && shown >= props.min && shown <= props.max && !props.disabled;
@@ -132,7 +134,7 @@ export default function Tone3000TouchEditor(props: Tone3000TouchEditorProps) {
                     event.preventDefault(); event.stopPropagation();
                     event.currentTarget.setPointerCapture(event.pointerId);
                     gesture.current = { pointer: event.pointerId, x: event.clientX, width: Math.max(1, event.currentTarget.getBoundingClientRect().width - 32),
-                        start: current.current, element: event.currentTarget, changed: false, previewed: false };
+                        sensitivity: fine ? .1 : 1, start: current.current, element: event.currentTarget, changed: false, previewed: false };
                 }} onPointerMove={changeDrag}
                 onPointerUp={event => {
                     if (!allowed() || gesture.current?.pointer !== event.pointerId) return;
@@ -159,6 +161,9 @@ export default function Tone3000TouchEditor(props: Tone3000TouchEditorProps) {
             <Stack direction="row" spacing={1} sx={{ justifyContent: "center", my: .5 }}>
                 <Button variant="outlined" disabled={!valid} aria-label={`Decrease ${props.label}`} onClick={() => { cancelGesture(); commit(current.current - props.step); }}>−</Button>
                 <Button variant="outlined" disabled={!valid} aria-label={`Increase ${props.label}`} onClick={() => { cancelGesture(); commit(current.current + props.step); }}>+</Button>
+                <Button variant={fine ? "contained" : "outlined"} disabled={!valid} aria-pressed={fine}
+                    title="Fine mode makes the next drag ten times slower."
+                    onClick={() => { if (allowed()) setFine(!fine); }}>Fine</Button>
             </Stack>
             <Button fullWidth disabled={!valid} onClick={() => { cancelGesture(); commit(baseline.current, true); }}>Restore starting value</Button>
             {typing && <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start", mt: 1 }}>

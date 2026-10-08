@@ -171,3 +171,35 @@ test("production old button, entry and pointer callbacks cannot alter or close a
     f.advance(34); assert.equal(f.previews.length, before + 1); assert.equal(f.previews.at(-1), .8);
     slider.props.onPointerUp(f.event(90)); assert.deepEqual(f.commits, [.8]); f.unmount();
 });
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-16] [DES-FOUR-REFINEMENTS] [7.28] */
+test("Fine mode latches ten times slower drag, keeps step/Restore, and resets for the next owner", () => {
+    const f = fixture({ value: 0, min: -24, max: 24, step: .1 });
+    assert.equal(f.button("Fine").props["aria-pressed"], false);
+    f.button("Fine").props.onClick(); f.render();
+    assert.equal(f.button("Fine").props["aria-pressed"], true);
+    let slider = f.slider(); slider.props.onPointerDown(f.event(50));
+    slider.props.onPointerMove(f.event(100)); assert.deepEqual(f.previews, [1.2]);
+    f.button("Fine").props.onClick(); f.render();
+    slider = f.slider(); slider.props.onPointerUp(f.event(150));
+    assert.deepEqual(f.commits, [2.4], "mid-gesture toggle never changes latched sensitivity");
+    f.render(); f.button("+").props.onClick(); assert.equal(f.commits.at(-1), 2.5);
+    f.button("Restore starting value").props.onClick(); assert.equal(f.commits.at(-1), 0);
+    f.render(); slider = f.slider(); slider.props.onPointerDown(f.event(50)); slider.props.onPointerUp(f.event(150));
+    assert.equal(f.commits.at(-1), 24, "next ordinary drag spans the original full range");
+    f.button("Fine").props.onClick(); f.render(); const oldFine = f.button("Fine");
+    f.update({ scopeKey: "new owner", value: 0 });
+    assert.equal(f.button("Fine").props["aria-pressed"], false);
+    oldFine.props.onClick(); f.render(); assert.equal(f.button("Fine").props["aria-pressed"], false);
+    f.unmount();
+});
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-16] [DES-FOUR-REFINEMENTS] [7.28] */
+test("Fine drag keeps logarithmic native geometry and release-only dispatch", () => {
+    const f = fixture({ value: 20, min: 20, max: 20000, step: 1, onChange: undefined,
+        valueToRange: value => Math.log(value / 20) / Math.log(1000), rangeToValue: range => 20 * 1000 ** range });
+    f.button("Fine").props.onClick(); f.render(); const slider = f.slider();
+    slider.props.onPointerDown(f.event(50)); slider.props.onPointerMove(f.event(150)); slider.props.onPointerUp(f.event(250));
+    assert.deepEqual(f.previews, []); assert.deepEqual(f.commits, [40]); assert.equal(f.timers.size, 0);
+    f.unmount();
+});
