@@ -248,6 +248,11 @@ export interface PedalboardDisplayNode {
     numberOfInputs: number;
     numberOfOutputs: number;
     clickable?: boolean;
+    /** Static display-only artwork; no plugin discovery or model registration.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-FOLD-GEAR] [7.13]
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-T3K-LOGO] [7.17]
+     */
+    icon?: { url: string; label: string; width?: number; height?: number; preserveColors?: boolean };
 }
 /** Actual dimensions/terminal offsets reported by the existing renderer.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-OPERATE] [3.15]
@@ -1182,11 +1187,23 @@ const PedalboardView =
                     : ReactNode {
                     const classes = withStyles.getClasses(this.props);
                     if (this.isReadOnly()) {
+                        const display = this.props.displayNodes?.[instanceId];
+                        const artwork = this.props.displayBoard ? display?.icon : undefined;
                         const icon = <div className={hasBorder ? (instanceId === this.props.selectedId ? classes.selectedIconFrame : classes.iconFrame) : classes.borderlessIconFrame}
                                 style={{ opacity: enabled ? .99 : .3 }}>
-                                <PluginIcon pluginType={iconType} size={24} color={getIconColor(iconColor)} pluginMissing={pluginNotFound} />
+                                {artwork?.preserveColors ? <img src={artwork.url} alt={artwork.label} title={artwork.label}
+                                    draggable={false} style={{ width: artwork.width ?? 24, height: artwork.height ?? 24,
+                                        objectFit: "contain", display: "inline-block", pointerEvents: "none" }} />
+                                : artwork ? <span role="img" aria-label={artwork.label} title={artwork.label}
+                                    style={{ width: artwork.width ?? 24, height: 24, display: "inline-block",
+                                        // Stock SVGs inherit a default fill; a mask must
+                                        // explicitly paint even when no custom color exists.
+                                        backgroundColor: getIconColor(iconColor) ?? this.props.theme.palette.text.primary,
+                                        mask: `url("${artwork.url}") center / contain no-repeat`,
+                                        WebkitMask: `url("${artwork.url}") center / contain no-repeat`,
+                                        pointerEvents: "none" }} />
+                                    : <PluginIcon pluginType={iconType} size={24} color={getIconColor(iconColor)} pluginMissing={pluginNotFound} />}
                             </div>;
-                        const display = this.props.displayNodes?.[instanceId];
                         if (this.props.displayBoard && display?.clickable && this.props.onDisplayNodeClick) {
                             return <ButtonBase className={classes.pedalButton} aria-label={`Open block settings: ${display.name}`}
                                 onClick={event => { event.preventDefault(); event.stopPropagation(); this.props.onDisplayNodeClick!(instanceId); }}

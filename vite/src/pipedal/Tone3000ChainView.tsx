@@ -10,9 +10,11 @@ import { PluginType } from "./Lv2Plugin";
 import { projectTone3000Chain } from "./Tone3000ChainProjection";
 import type { Tone3000DisplayEntry } from "./Tone3000ChainProjection";
 import type { Tone3000Summary } from "./Tone3000Rig";
+import { tone3000GearIcon, tone3000LogoIcon } from "./Tone3000Gear";
 
 /** Reuse PiPedal's renderer on an isolated local board; no RPCs or setters.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-OPERATE] [3.15]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-15] [DES-FOLD-GEAR] [7.13]
  */
 export default function Tone3000ChainView({ summary, embedded = false, onLayout, onBlockClick, focusedBlockId, parent }: {
     summary: Tone3000Summary; embedded?: boolean; onLayout?: (layout: PedalboardDisplayLayout) => void;
@@ -45,6 +47,7 @@ export default function Tone3000ChainView({ summary, embedded = false, onLayout,
                 const name = block ? `${block.title || (block.type === "ir" ? "IR" : "NAM")}${block.enabled ? "" : " (bypassed)"}`
                     : `${entry.kind === "direct" && entry.lane === "right" ? "Right" : "Left"} pass-through`;
                 nodes[item.instanceId] = { name, pluginType: type, numberOfInputs: 1, numberOfOutputs: 1,
+                    ...(block ? { icon: tone3000GearIcon(block.gear, block.format || block.type) } : {}),
                     clickable: block !== null && onBlockClick !== undefined };
                 if (block) blockIds.set(item.instanceId, block.blockId);
             }
@@ -58,7 +61,8 @@ export default function Tone3000ChainView({ summary, embedded = false, onLayout,
             parentMarker.instanceId = nextDisplayId--;
             parentMarker.uri = "";
             parentMarker.isEnabled = true;
-            nodes[parentMarker.instanceId] = { name: "TONE3000", pluginType: parent!.pluginType,
+            // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-T3K-LOGO] [7.17]
+            nodes[parentMarker.instanceId] = { name: "TONE3000", icon: tone3000LogoIcon, pluginType: parent!.pluginType,
                 numberOfInputs: inputChannels, numberOfOutputs: inputChannels, clickable: true };
         }
         board.items = [...(parentMarker ? [parentMarker] : []), ...items(projection.entries)];
