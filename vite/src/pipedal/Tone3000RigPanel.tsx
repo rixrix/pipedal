@@ -358,6 +358,8 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     const draftToken = useRef(Symbol("T3K panel draft"));
     const [pendingSections, setPendingSections] = useState<string[]>([]);
     const saveCancellation = useRef<(() => void) | null>(null);
+    const operationLabel = useRef("");
+    const rigRecovery = useRef(false);
     const ownerKey = useCallback(() => JSON.stringify([instanceId, model.banks.get().selectedBank,
         model.presets.get().selectedInstanceId, model.selectedSnapshot.get()]), [instanceId, model]);
     const ownership = useRef({ key: ownerKey(), epoch: 0 });
@@ -374,14 +376,20 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         ++ownership.current.epoch; ++generation.current; ++operationGeneration.current;
         captureReadyRef.current = false; captureOwner.current = null; setCaptureReady(false);
         saveCancellation.current?.();
-        if (working.current) setRecoveryNotice("The rig or connection changed. The operation may have completed; check the current preset before retrying.");
+        if (working.current) {
+            rigRecovery.current = operationLabel.current === "Applying changes";
+            setRecoveryNotice("The rig or connection changed. The operation may have completed; check the current preset before retrying.");
+        }
         working.current = false; setBusy(false); setWaiting(false);
     }, []);
 
     const acceptRig = useCallback((value: Tone3000CurrentState) => {
+        const matchesPendingDraft = rigDirty.current && !!draftRef.current
+            && !tone3000RigDraftChanged(value, draftRef.current, followRef.current);
         rigRef.current = value; draftRef.current = value.summary; followRef.current = value.followDefaults;
         setRig(value); setDraft(value.summary); setFollow(value.followDefaults);
         rigDirty.current = false; setStale(false); setWaiting(false);
+        if (matchesPendingDraft && rigRecovery.current) { setRecoveryNotice(""); rigRecovery.current = false; }
         staleRef.current = false; waitingRef.current = false;
         publishDraft();
     }, [publishDraft]);
@@ -501,6 +509,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         working.current = true; ++generation.current;
         const request = ++operationGeneration.current;
         const isCurrent = () => request === operationGeneration.current && ownerCurrent(key, epoch);
+        operationLabel.current = label;
         setBusyLabel(label); setBusy(true); setError(""); setNotice("");
         try {
             const message = await action(isCurrent);

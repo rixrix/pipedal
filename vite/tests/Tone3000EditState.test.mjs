@@ -176,10 +176,42 @@ test("actual accepted Apply reconciles a full-board event from observed state an
     const read = f.holdRead(); f.model.pedalboard.set({ ...f.model.pedalboard.get() });
     read.reject(Error("Apply accepted; plugin state has not reflected edit yet")); await f.flush(); assert.match(f.status(), /Wait before saving/);
     f.writes[0].pending.resolve(true); await f.flush(); assert.equal(f.saves.length, 0);
-    const actual = structuredClone(f.current); actual.revision = "applied"; actual.summary.blocks[0].mix = .8;
+    const actual = structuredClone(f.current); actual.revision = "applied"; actual.summary.blocks[0].mix = Math.fround(.8);
     f.setCurrent(actual); f.dirty(); f.tick(); await f.flush();
     assert.match(f.status(), /not saved/); assert.equal(f.button("Apply block changes").props.disabled, true);
     assert.equal(f.button("Save preset").props.disabled, false); assert.equal(f.saves.length, 0); f.unmount();
+});
+
+test("native float32 readback reconciles exact control steps without accepting a different step or overflow", async () => {
+    const f = fixture(); await f.flush();
+    for (const value of [.99, .8, -.1, 0.1, 0.31234]) assert.equal(f.helper({ mix: value }, { mix: Math.fround(value) }, true), true);
+    assert.equal(f.helper({ mix: .99 }, { mix: Math.fround(.98) }, true), false);
+    assert.equal(f.helper({ activeModelId: 16777216 }, { activeModelId: 16777217 }, true), false);
+    assert.equal(f.helper({ slimSize: .99 }, { slimSize: Math.fround(.99) }, true), false);
+    assert.equal(f.helper({ inputCalibrationLevel: .99 }, { inputCalibrationLevel: Math.fround(.99) }), false);
+    assert.equal(f.helper(1e40, 2e40), false);
+    assert.equal(f.helper(Infinity, Infinity), false);
+    const edited = structuredClone(f.block); edited.mix = .99;
+    f.blockControl().props.onChange(edited); f.render(); f.button("Apply block changes").props.onClick();
+    const actual = structuredClone(f.current); actual.revision = "native-float"; actual.summary.blocks[0].mix = Math.fround(.99);
+    f.setCurrent(actual); f.dirty(); f.model.pedalboard.set({ ...f.model.pedalboard.get() });
+    f.writes[0].pending.resolve(true); await f.flush();
+    assert.match(f.status(), /not saved/); assert.equal(f.button("Save preset").props.disabled, false);
+    assert.equal(f.button("Apply block changes").props.disabled, true);
+    assert.equal(f.all().some(node => node.type === "Alert" && String(node.props.children).includes("operation may have completed")), false);
+    f.unmount();
+});
+
+test("matching rig capture cannot acknowledge an interrupted device-defaults Save", async () => {
+    const f = fixture("Settings"); await f.flush();
+    f.processing().props.onChange({ inputCalibrationLevel: 3 });
+    f.field("Processing profile").props.onChange({ target: { value: "home" } }); f.render();
+    f.button("Save defaults").props.onClick(); f.render();
+    const actual = structuredClone(f.current); actual.revision = "external"; actual.summary.inputCalibrationLevel = 3;
+    f.setCurrent(actual); f.model.pedalboard.set({ ...f.model.pedalboard.get() });
+    f.writes[0].pending.resolve(f.profile); await f.flush();
+    assert.equal(f.all().some(node => node.type === "Alert" && String(node.props.children).includes("operation may have completed")), true);
+    assert.equal(f.saves.length, 0); f.unmount();
 });
 
 test("actual hidden Settings drafts synchronously block Blocks Save and restore/unmount removes only that token", async () => {

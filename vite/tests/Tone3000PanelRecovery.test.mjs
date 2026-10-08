@@ -29,6 +29,7 @@ function fixture(kind, section = "Blocks") {
         profileDraftRef: { current: null }, profileIdRef: { current: "" }, staleRef: { current: false },
         activeRef: { current: true }, captureReadyRef: { current: false }, captureOwner: { current: null },
         ownership: { current: { key: "", epoch: 0 } }, saveCancellation: { current: null },
+        operationLabel: { current: "" }, rigRecovery: { current: false },
         draftToken: { current: Symbol("test panel") },
         active: true, open: true, section, instanceId: 1, busy: false, refreshing: false,
         error: "", notice: "", recoveryNotice: "", stale: false, waiting: false, connected: true,
