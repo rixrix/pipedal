@@ -21,7 +21,7 @@ import Tone3000PerformanceDialog from "./Tone3000PerformanceDialog";
 import Tone3000BundleDialog from "./Tone3000BundleDialog";
 import Tone3000MixMatchDialog from "./Tone3000MixMatchDialog";
 import { PiPedalModelFactory, State } from "./PiPedalModel";
-import { tone3000BankLocation, tone3000FilterLibrary } from "./Tone3000Library";
+import { tone3000BankLocation, tone3000FilterLibrary, tone3000SavedCopies } from "./Tone3000Library";
 import type { Tone3000Import, Tone3000LibraryEntry, Tone3000LibraryResult, Tone3000PreviewSelection, Tone3000LibraryFilter } from "./Tone3000Library";
 
 /** Discover and explicitly apply complete rigs without operator file copying.
@@ -30,6 +30,7 @@ import type { Tone3000Import, Tone3000LibraryEntry, Tone3000LibraryResult, Tone3
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-STABILITY-REVIEW] [7.22]
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-PLAIN-TOOLS] [7.25]
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-FOUR-REFINEMENTS] [7.30]
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-26] [DES-PITCH-LV2] [7.36]
  */
 export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     const model = PiPedalModelFactory.getInstance();
@@ -173,6 +174,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
         return count + (count === 1 ? " rig uploaded. Select Add to save it in PiPedal." : " rigs uploaded. Select Add to save them in PiPedal.");
     });
     const entries = tone3000FilterLibrary(library.entries, filter, search, banks);
+    const savedCopies = tone3000SavedCopies(library.entries, search, banks);
 
     return <>
         <DialogEx tag="tone3000Library" open={open} fullWidth maxWidth="md"
@@ -189,11 +191,13 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                 }}>
                 <Stack spacing={2}>
                     <Typography variant="body2" color="text.secondary">
-                        Presets saved in TONE3000 on this Pi appear here automatically. Choose a source, then Add to save a copy in PiPedal. Load plays a saved copy. Update replaces that copy with its source.
+                        TONE3000 files on this Pi appear here automatically. Saved shows your PiPedal rigs. Add saves a new copy; Load plays it; Update replaces it from T3K.
                     </Typography>
                     <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}>
                         <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => { void refresh(true); }}>Refresh</Button>
                         <Button variant="contained" disabled={busy || refreshing || !connected} onClick={() => uploadInput.current?.click()}>Upload presets</Button>
+                        <Button variant="outlined" disabled={busy || refreshing || !connected}
+                            onClick={() => { setFilter("saved"); setSearch(""); }}>Mix &amp; Match</Button>
                         {(busy || refreshing) && <CircularProgress size={20} aria-label={busy ? "Applying rig" : "Finding rigs"} />}
                         <input ref={uploadInput} type="file" accept=".t3kpreset" multiple hidden
                             aria-label="Choose TONE3000 preset files" onChange={event => {
@@ -215,10 +219,33 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                             <Button key={value} variant={filter === value ? "contained" : "outlined"} aria-pressed={filter === value}
                                 onClick={() => setFilter(value)}>{label}</Button>)}
                     </Stack>
-                    {!entries.length && !refreshing && <Typography color="text.secondary">
+                    {filter === "saved" && <Typography variant="body2" color="text.secondary">
+                        These are saved PiPedal rigs. Choose Mix &amp; Match beneath a rig to create a separate experimental copy.
+                    </Typography>}
+                    {filter !== "saved" && <Typography variant="body2" color="text.secondary">
+                        Status refers to each T3K source file. Exporting creates another file; it does not remove your saved PiPedal rig.
+                    </Typography>}
+                    {!(filter === "saved" ? savedCopies.length : entries.length) && !refreshing && <Typography color="text.secondary">
                         {library.entries.length ? "No matching rigs." : "No rigs found. Save a preset in TONE3000 or upload a .t3kpreset file."}
                     </Typography>}
-                    {entries.map(entry => <Paper variant="outlined" key={entry.key} sx={{ p: { xs: 1.5, sm: 2 }, minWidth: 0 }}>
+                    {filter === "saved" && savedCopies.map(({ entry, target }) => <Paper variant="outlined"
+                        key={entry.key + "/" + target.bankId + "/" + target.presetId + "/" + target.instanceId} sx={{ p: { xs: 1.5, sm: 2 }, minWidth: 0 }}>
+                        <Stack spacing={1}>
+                            <Typography variant="subtitle1" sx={{ overflowWrap: "anywhere" }}>{target.name}</Typography>
+                            <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>Bank: {tone3000BankLocation(target.bankId, banks)}{target.active ? " · Current rig" : ""}</Typography>
+                            <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>T3K source: {entry.name}</Typography>
+                            {target.sha256 !== entry.sha256 && <Typography variant="caption" color="warning.main">Source changed. Update replaces this saved copy.</Typography>}
+                            <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
+                                <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => setMixMatch({ entry, target })}>Mix &amp; Match</Button>
+                                <Button variant="outlined" disabled={busy || refreshing || !connected} onClick={() => load(target)}>Load</Button>
+                                <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, target, action: "preview" })}>Compare with source</Button>
+                                {target.sha256 !== entry.sha256 && <Button disabled={busy || refreshing || !connected}
+                                    onClick={() => setPreview({ entry, target, action: "update" })}>{target.active ? "Update & load" : "Update"}</Button>}
+                            </Stack>
+                            {target.hasSnapshotOverrides && <Typography variant="caption" color="text.secondary">Snapshots keep their saved tone versions when this rig is updated.</Typography>}
+                        </Stack>
+                    </Paper>)}
+                    {filter !== "saved" && entries.map(entry => <Paper variant="outlined" key={entry.key} sx={{ p: { xs: 1.5, sm: 2 }, minWidth: 0 }}>
                         <Stack spacing={1}>
                             <Box sx={{ minWidth: 0 }}>
                                 <Typography variant="subtitle1" sx={{ overflowWrap: "anywhere" }}>{entry.name}</Typography>
@@ -226,7 +253,7 @@ export default function Tone3000LibraryDialog({ open, onClose }: { open: boolean
                             </Box>
                             <Chip size="small" sx={{ alignSelf: "flex-start", maxWidth: "100%", height: "auto", py: .5,
                                 "& .MuiChip-label": { whiteSpace: "normal" } }}
-                                label={!entry.imports.length ? "Not saved in PiPedal" : entry.imports.some(target => target.sha256 !== entry.sha256) ? "Update available" : "Saved in PiPedal"}
+                                label={!entry.imports.length ? "Available to add" : entry.imports.some(target => target.sha256 !== entry.sha256) ? "Update available" : "Saved in PiPedal"}
                                 color={entry.imports.some(target => target.sha256 !== entry.sha256) ? "warning" : "default"} />
                             <Stack direction="row" sx={{ flexWrap: "wrap", gap: .5 }}>
                                 <Button disabled={busy || refreshing || !connected} onClick={() => setPreview({ entry, action: "preview" })}>Preview source</Button>

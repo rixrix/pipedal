@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import vm from "node:vm";
-import { tone3000BankLocation, tone3000FilterLibrary } from "../src/pipedal/Tone3000Library.ts";
+import { tone3000BankLocation, tone3000FilterLibrary, tone3000SavedCopies } from "../src/pipedal/Tone3000Library.ts";
 
 const ts = createRequire(new URL("../package.json", import.meta.url))("typescript");
 const read = name => readFileSync(new URL("../src/pipedal/" + name, import.meta.url), "utf8");
@@ -39,7 +39,7 @@ test("actual filter helper combines saved/new/update status and bank search with
  */
 function fixture() {
     const slots = [], effects = [], pending = [], writes = []; let cursor = 0, tree, value = { entries, warnings: [] };
-    const context = { tone3000BankLocation, tone3000FilterLibrary, console, State: { Ready: 1, Reconnecting: 2 },
+    const context = { tone3000BankLocation, tone3000FilterLibrary, tone3000SavedCopies, console, State: { Ready: 1, Reconnecting: 2 },
         window: { setInterval: () => 1, clearInterval() {} }, React: { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }) },
         useState(initial) { const at = cursor++; if (!(at in slots)) slots[at] = initial;
             return [slots[at], value => { slots[at] = typeof value === "function" ? value(slots[at]) : value; }]; },
@@ -72,17 +72,17 @@ function fixture() {
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-FOUR-REFINEMENTS] [7.30] */
 test("production Library filters observe bank renames, preserve refresh selection and exact compare/update/load targets", async () => {
     const f = fixture(); await flush(); f.render();
-    f.button("Saved").props.onClick(); f.render(); assert.deepEqual(f.cards(), ["current", "changed", "other"]);
+    f.button("Saved").props.onClick(); f.render(); assert.deepEqual(f.cards(), ["current/6/21/3", "changed/6/20/3", "changed/8/90/3", "other/99/22/3"]);
     const field = () => f.all().find(node => node.type === "TextField");
-    field().props.onChange({ target: { value: "Rx" } }); f.render(); assert.deepEqual(f.cards(), ["current", "changed"]);
+    field().props.onChange({ target: { value: "Rx" } }); f.render(); assert.deepEqual(f.cards(), ["current/6/21/3", "changed/6/20/3"]);
     f.model.banks.set({ ...banks, entries: [{ instanceId: 6, name: "Stage set" }, ...banks.entries.slice(1)] }); f.render();
     assert.deepEqual(f.cards(), []); assert.equal(field().props.value, "Rx");
     field().props.onChange({ target: { value: "Stage" } }); f.render();
-    assert.deepEqual(f.cards(), ["current", "changed"]);
+    assert.deepEqual(f.cards(), ["current/6/21/3", "changed/6/20/3"]);
     assert.ok(f.all().some(node => node.type === "Typography" && children(node).includes("Stage set")));
     f.setLibrary({ entries: [...entries].reverse(), warnings: [] }); f.button("Refresh").props.onClick(); await flush(); f.render();
     assert.equal(f.button("Saved").props["aria-pressed"], true); assert.equal(field().props.value, "Stage");
-    assert.deepEqual(f.cards(), ["current", "changed"]); assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.cards(), ["current/6/21/3", "changed/6/20/3"]); assert.deepEqual(f.writes, []);
     f.button("Compare with source").props.onClick(); f.render();
     const preview = () => f.all().find(node => node.type === "Tone3000PresetPreviewDialog");
     assert.equal(preview().props.selection.entry, entries[2]); assert.equal(preview().props.selection.target, entries[2].imports[0]);
@@ -94,4 +94,42 @@ test("production Library filters observe bank renames, preserve refresh selectio
     assert.equal(f.writes[1][0], entries[0]); assert.equal(f.writes[1][1], entries[0].imports[0]);
     f.cleanup();
     const before = f.cards(); f.model.banks.set({ selectedBank: -1, entries: [] }); f.render(); assert.deepEqual(f.cards(), before, "unmounted bank subscription has been removed");
+});
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-PITCH-LV2] [7.30] [7.36] */
+test("saved rig search lists individual authoritative copies, not similarly named exported sources", () => {
+    const original = source("Bogner Fullstack", [{ ...target(6, 24), name: "Rx Bogner Fullstack" },
+        { ...target(8, 44), name: "Studio Bogner" }]);
+    const exported = source("Rx Bogner Fullstack (PiPedal)");
+    const list = [exported, original, entries[2]], before = structuredClone(list);
+    const result = tone3000SavedCopies(list, "", banks);
+    assert.deepEqual(result.map(row => row.target.presetId), [21, 24, 44]);
+    assert.equal(result[1].entry, original); assert.equal(result[1].target, original.imports[0]);
+    assert.deepEqual(tone3000SavedCopies(list, "Rx Bogner", banks).map(row => row.target.presetId), [24]);
+    assert.deepEqual(tone3000SavedCopies(list, "Spare", banks).map(row => row.target.presetId), [44]);
+    assert.deepEqual(tone3000SavedCopies(list, "(PiPedal)", banks), []);
+    assert.deepEqual(list, before);
+});
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-26] [DES-PITCH-LV2] [7.36] */
+test("prominent Mix & Match reveals actual Rx name and opens only its real saved identity without writes", async () => {
+    const f = fixture(); await flush(); f.render();
+    const original = source("Bogner Fullstack", [{ ...target(6, 24), name: "Rx Bogner Fullstack" }]);
+    const exported = source("Rx Bogner Fullstack (PiPedal)");
+    f.setLibrary({ entries: [exported, original], warnings: [] });
+    f.button("Refresh").props.onClick(); await flush(); f.render();
+    assert.ok(f.all().some(node => node.type === "Chip" && node.props.label === "Available to add"));
+    f.all().find(node => node.type === "TextField").props.onChange({ target: { value: "(PiPedal)" } }); f.render();
+    f.button("Mix & Match").props.onClick(); f.render();
+    assert.equal(f.button("Saved").props["aria-pressed"], true);
+    assert.equal(f.all().find(node => node.type === "TextField").props.value, "");
+    assert.deepEqual(f.cards(), ["Bogner Fullstack/6/24/3"]);
+    assert.ok(f.all().some(node => node.type === "Typography" && children(node).includes("Rx Bogner Fullstack")));
+    const mixButtons = f.all().filter(node => node.type === "Button" && children(node).includes("Mix & Match"));
+    assert.equal(mixButtons.length, 2);
+    mixButtons[1].props.onClick(); f.render();
+    const dialog = f.all().find(node => node.type === "Tone3000MixMatchDialog");
+    assert.equal(dialog.props.selection.entry, original);
+    assert.equal(dialog.props.selection.target, original.imports[0]);
+    assert.deepEqual(f.writes, []); f.cleanup();
 });

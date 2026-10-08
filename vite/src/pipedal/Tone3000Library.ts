@@ -83,6 +83,23 @@ export function tone3000BankLocation(bankId: number, banks: Tone3000LibraryBanks
     return name?.trim() ? name : `Bank ${bankId} (name unavailable)`;
 }
 
+/** A real linked saved copy, never a source inferred from a similar preset name.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-PITCH-LV2] [7.30] [7.36]
+ */
+export interface Tone3000SavedCopy { entry: Tone3000LibraryEntry; target: Tone3000Import; }
+
+/** Search each saved rig independently and retain the server's exact identities.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-PITCH-LV2] [7.30] [7.36]
+ */
+export function tone3000SavedCopies(entries: readonly Tone3000LibraryEntry[], search: string,
+    banks: Tone3000LibraryBanks): Tone3000SavedCopy[] {
+    const needle = search.trim().toLocaleLowerCase();
+    return entries.flatMap(entry => entry.imports.map(target => ({ entry, target })))
+        .filter(({ entry, target }) => [target.name, entry.name, tone3000BankLocation(target.bankId, banks)]
+            .join(" ").toLocaleLowerCase().includes(needle))
+        .sort((left, right) => Number(right.target.active) - Number(left.target.active));
+}
+
 /** Preserve source/target objects and server order, except current-first in Saved.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-11] [DES-FOUR-REFINEMENTS] [7.30]
  */

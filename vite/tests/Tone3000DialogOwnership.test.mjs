@@ -11,7 +11,7 @@ import { Tone3000StageRunner, Tone3000MeasurementSession, tone3000ValidMeasureme
 import { tone3000DraftNumber } from "../src/pipedal/Tone3000MobileLayout.ts";
 import { tone3000GearLabel } from "../src/pipedal/Tone3000Gear.ts";
 import { tone3000NumberPresentation } from "../src/pipedal/Tone3000ControlUnits.ts";
-import { tone3000BankLocation, tone3000FilterLibrary } from "../src/pipedal/Tone3000Library.ts";
+import { tone3000BankLocation, tone3000FilterLibrary, tone3000SavedCopies } from "../src/pipedal/Tone3000Library.ts";
 
 const ts = createRequire(new URL("../package.json", import.meta.url))("typescript");
 const source = name => readFileSync(new URL("../src/pipedal/" + name, import.meta.url), "utf8");
@@ -38,7 +38,7 @@ function fixture(kind) {
     const context = { console, Tone3000MixMatchSession, State: { Ready: 1, Reconnecting: 2 }, Tone3000ProgramEvidence,
         Tone3000BundleReader, tone3000BundleImportAllowed, tone3000BundleMaxBytes,
         Tone3000StageRunner, tone3000ValidMeasurement, tone3000QuietestTarget, tone3000LevelProposalAllowed,
-        tone3000StageBlockName, tone3000StageRequestedSize, tone3000StageCalibration, tone3000DraftNumber, tone3000BankLocation, tone3000FilterLibrary,
+        tone3000StageBlockName, tone3000StageRequestedSize, tone3000StageCalibration, tone3000DraftNumber, tone3000BankLocation, tone3000FilterLibrary, tone3000SavedCopies,
         useSyncExternalStore: (_subscribe, get) => get(),
         window: { setInterval: () => 1, clearInterval() {} },
         React: { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }) },
