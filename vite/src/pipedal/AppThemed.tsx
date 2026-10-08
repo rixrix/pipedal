@@ -386,8 +386,7 @@ export
 
         this.promptForUpdateHandler = this.promptForUpdateHandler.bind(this);
         this.errorChangeHandler_ = this.setErrorMessage.bind(this);
-        this.beforeUnloadListener = this.beforeUnloadListener.bind(this);
-        this.unloadListener = this.unloadListener.bind(this);
+        this.pageHideListener = this.pageHideListener.bind(this);
         this.stateChangeHandler_ = this.setDisplayState.bind(this);
         this.presetChangedHandler = this.presetChangedHandler.bind(this);
         this.alertMessageChangedHandler = this.alertMessageChangedHandler.bind(this);
@@ -581,16 +580,13 @@ export
         this.setState({ isFullScreen: !this.state.isFullScreen });
     }
 
-    private unloadListener(e: Event) {
-        this.model_.close();
-        return undefined;
+    /** Close only after navigation commits; a canceled refresh must leave the UI connected.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [DES-LANDSCAPE] [7.38]
+     */
+    private pageHideListener(event: PageTransitionEvent) {
+        if (!event.persisted) this.model_.close();
     }
 
-    private beforeUnloadListener(e: Event) {
-        alert("BeforeUnload");
-        this.model_.close();
-        return undefined;
-    }
     promptForUpdateHandler(newValue: boolean) {
         if (this.model_.enableAutoUpdate) {
             if (this.state.updateDialogOpen !== newValue) {
@@ -601,7 +597,7 @@ export
     componentDidMount() {
 
         super.componentDidMount();
-        window.addEventListener("beforeunload", this.beforeUnloadListener);
+        window.addEventListener("pagehide", this.pageHideListener);
 
         this.model_.errorMessage.addOnChangedHandler(this.errorChangeHandler_);
         this.model_.state.addOnChangedHandler(this.stateChangeHandler_);
@@ -646,7 +642,7 @@ export
             this.handleZoomedUiControlChanged
         );
 
-        window.removeEventListener("beforeunload", this.beforeUnloadListener);
+        window.removeEventListener("pagehide", this.pageHideListener);
 
         this.model_.promptForUpdate.removeOnChangedHandler(this.promptForUpdateHandler);
         this.model_.errorMessage.removeOnChangedHandler(this.errorChangeHandler_);
