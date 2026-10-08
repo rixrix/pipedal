@@ -22,6 +22,7 @@
 #include "Locale.hpp"
 #include "Storage.hpp"
 #include "Tone3000Performance.hpp"
+#include "Tone3000MixMatch.hpp"
 #include "AudioConfig.hpp"
 #include "PiPedalException.hpp"
 #include "AlsaSequencer.hpp"
@@ -1602,6 +1603,31 @@ int64_t Storage::SaveTone3000PerformanceBank(BankFile& bank) try {
     return id;
 }catch(const std::filesystem::filesystem_error&){
     throw PiPedalStateException("Performance storage unavailable; inspect banks before retrying.");
+}
+
+/** One experimental preset, appended without selecting or altering owner state.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [DES-PITCH-LV2] [DES-SEC] [7.34]
+ */
+int64_t Storage::SaveTone3000MixMatchBank(BankFile& bank) try {
+    CheckTone3000MixMatchPublication();
+    if(bank.presets().size()!=1||!bank.name().starts_with(Tone3000MixMatch::BANK_PREFIX))
+        throw PiPedalArgumentException("Invalid experimental amp/cab bank.");
+    const auto base=bank.name();unsigned suffix=2;
+    while(bankIndex.hasName(bank.name())||std::filesystem::exists(GetBankFileName(bank.name()))
+        ||std::filesystem::is_symlink(std::filesystem::symlink_status(GetBankFileName(bank.name())))){
+        if(suffix>1000)throw PiPedalStateException("Too many experimental banks by that name.");
+        bank.name(base+" ("+std::to_string(suffix++)+")");
+    }
+    auto next=bankIndex;
+    const auto after=next.entries().empty()?-1:next.entries().back().instanceId();
+    const auto id=next.addBank(after,bank.name());
+    tone3000MixMatchPublicationGuard.Publish([&]{
+        Tone3000Performance::Publish(dataRoot,GetBankFileName(bank.name()),GetIndexFileName(),bank,next);
+    });
+    bankIndex=std::move(next);
+    return id;
+}catch(const std::filesystem::filesystem_error&){
+    throw PiPedalStateException("Experimental bank storage unavailable; inspect banks before retrying.");
 }
 
 int64_t Storage::UploadBank(BankFile& bankFile, int64_t uploadAfter)

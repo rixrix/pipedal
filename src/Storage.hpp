@@ -22,6 +22,7 @@
 #include <iostream>
 #include "Pedalboard.hpp"
 #include "Tone3000Library.hpp"
+#include "Tone3000MixMatch.hpp"
 #include "Presets.hpp"
 #include "PluginPreset.hpp"
 #include "Banks.hpp"
@@ -77,6 +78,7 @@ private:
 
     std::filesystem::path configRoot;
     BankIndex bankIndex;
+    Tone3000MixMatchPublicationGuard tone3000MixMatchPublicationGuard;
     BankFile currentBank;
     PluginPresetIndex pluginPresetIndex;
     
@@ -185,6 +187,9 @@ public:
     Tone3000ImportResult SaveTone3000Preset(int64_t bankId, int64_t presetId, Pedalboard& board, int64_t instanceId);
     /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4] */
     int64_t SaveTone3000PerformanceBank(BankFile& bank);
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [DES-MIX-MATCH] [7.34] */
+    int64_t SaveTone3000MixMatchBank(BankFile& bank);
+    void CheckTone3000MixMatchPublication() const { tone3000MixMatchPublicationGuard.Check(); }
 
     
     bool LoadPreset(int64_t presetId);

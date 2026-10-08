@@ -31,6 +31,16 @@ namespace pipedal
     class Snapshot;
     class PluginHost;
 
+    /** Provenance for an explicit experimental saved copy, never Library Update.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [DES-MIX-MATCH] [7.34]
+     */
+    struct Tone3000DerivedSource
+    {
+        int64_t bankId_ = -1, presetId_ = -1, instanceId_ = -1;
+        std::string revision_, ampBlockId_, cabBlockId_, stage_, creationId_, requestHash_;
+        DECLARE_JSON_MAP(Tone3000DerivedSource);
+    };
+
 #define SPLIT_PEDALBOARD_ITEM_URI "uri://two-play/pipedal/pedalboard#Split"
 #define EMPTY_PEDALBOARD_ITEM_URI "uri://two-play/pipedal/pedalboard#Empty"
 
@@ -109,6 +119,7 @@ namespace pipedal
         // Missing/old metadata keeps saved processing overrides.
         // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
         bool tone3000FollowDefaults_ = false;
+        std::optional<Tone3000DerivedSource> tone3000DerivedSource_;
 
         // non persistent state.
         PropertyMap patchProperties;
@@ -150,6 +161,7 @@ namespace pipedal
         GETTER_SETTER_REF(tone3000SourceKey)
         GETTER_SETTER_REF(tone3000SourceHash)
         GETTER_SETTER(tone3000FollowDefaults)
+        GETTER_SETTER_REF(tone3000DerivedSource)
 
         Lv2PluginState &lv2State() { return lv2State_; } // non-const version.
         GETTER_SETTER_REF(lilvPresetUri)

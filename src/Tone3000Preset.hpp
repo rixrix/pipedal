@@ -155,6 +155,14 @@ namespace pipedal
                                                const std::string &rawId, const std::string &name);
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.6] */
         static double OutputLevel(const Lv2PluginState &state);
+        /** Validated pinned parameter only; no arbitrary state-tree access.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+         */
+        static double ParameterValue(const Lv2PluginState &state, const std::string &id);
+        /** Retain all raw assets/session state while disabling only native pitch.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+         */
+        static Lv2PluginState WithPitchDisabled(const Lv2PluginState &state);
 
         /** Pure, strict mono amp-head/cab copy. Explicit source block IDs and
          * amp-head confirmation are mandatory; combined captures stay intact.

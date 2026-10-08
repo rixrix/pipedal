@@ -1303,6 +1303,27 @@ double Tone3000Preset::OutputLevel(const Lv2PluginState &state)
     return found==parameters.end() ? .5 : found->second;
 }
 
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34] */
+double Tone3000Preset::ParameterValue(const Lv2PluginState &state, const std::string &id)
+{
+    const auto bytes = Decode(state); const auto tree = StateTree(bytes);
+    const auto parameters = ParameterValues(*tree.Child("PARAMETERS"), "PARAM");
+    if (std::none_of(PARAMETERS.begin(), PARAMETERS.end(), [&](const auto &p) { return id == p.id; }))
+        Fail("Unknown TONE3000 parameter");
+    return ParameterOrDefault(parameters, id.c_str());
+}
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34] */
+Lv2PluginState Tone3000Preset::WithPitchDisabled(const Lv2PluginState &state)
+{
+    const auto bytes = Decode(state); auto tree = StateTree(bytes);
+    SetParameter(tree, "pitchEnabled", 0);
+    auto encoded = EncodeStateTree(tree);
+    auto result = state;
+    result.values_[STATE_URI].value_ = std::move(encoded.values_[STATE_URI].value_);
+    return result;
+}
+
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [DES-STAGE-BRIDGE] [7.6] */
 Lv2PluginState Tone3000Preset::EditState(const Lv2PluginState &state, const Tone3000StatePatch &patch)
 {

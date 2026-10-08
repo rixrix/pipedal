@@ -259,6 +259,7 @@ set (PIPEDAL_SOURCES
     Tone3000Defaults.hpp Tone3000Defaults.cpp
     Tone3000Operations.hpp Tone3000Operations.cpp
     Tone3000Performance.hpp Tone3000Performance.cpp
+    Tone3000MixMatch.hpp Tone3000MixMatch.cpp
     AudioRecoveryPolicy.hpp
     Tone3000Stage.hpp Tone3000Stage.cpp
     Tone3000BundleCheck.hpp Tone3000BundleCheck.cpp
@@ -516,6 +517,7 @@ add_executable(pipedaltest
     Tone3000LibraryTest.cpp
     Tone3000DefaultsTest.cpp
     Tone3000PerformanceTest.cpp
+    Tone3000MixMatchTest.cpp
     AudioRecoveryPolicyTest.cpp
     Tone3000StageTest.cpp
     Tone3000BundleCheckTest.cpp
@@ -980,3 +982,6 @@ install (TARGETS pipedald pipedaladmind pipedal_update DESTINATION ${CMAKE_INSTA
    )
 
    
+
+# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+set_property(SOURCE Tone3000MixMatch.cpp Tone3000MixMatchTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)

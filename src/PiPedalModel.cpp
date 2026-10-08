@@ -728,6 +728,7 @@ void PiPedalModel::SetPedalboard(int64_t clientId, Pedalboard &pedalboard)
         // Capture a completion against its old owner before assigning the desired board.
         // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
         CancelTone3000StageJobs();
+        Tone3000MixMatch::PinDerivedPolicies(pedalboard,&this->pedalboard);
         this->pedalboard = pedalboard;
         RegisterTone3000Intents();
         UpdateDefaults(&this->pedalboard);
@@ -805,6 +806,7 @@ void PiPedalModel::UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalbo
         // The supplied board is an intentional replacement, not a capture destination.
         // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
         CancelTone3000StageJobs(-1, false);
+        Tone3000MixMatch::PinDerivedPolicies(pedalboard,&this->pedalboard);
 
         // update vst3 presets if neccessary.
         // the pedalboard must be a manipualted instance of the current Lv2Pedalboard.
@@ -2719,6 +2721,9 @@ Tone3000DefaultsResult PiPedalModel::SetTone3000Defaults(const Tone3000DefaultsR
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
  */
 void PiPedalModel::ApplyTone3000FollowDefaults(Pedalboard& board) {
+    // Derived stages retain their explicitly authored processing policy.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+    Tone3000MixMatch::PinDerivedPolicies(board);
     std::optional<Tone3000ProcessingDefaults> defaults;
     for(auto item:board.GetAllPlugins()) if(item->uri()==Tone3000Preset::PLUGIN_URI && item->tone3000FollowDefaults()) {
         if(!defaults) defaults=GetTone3000Defaults().defaults_;
@@ -2941,6 +2946,10 @@ json_variant PiPedalModel::ApplyTone3000Level(int64_t clientId,uint64_t token,co
     if(active && hasPresetChanged)throw PiPedalStateException("Save or discard the playing rig's changes before applying this saved trim.");
     auto item=board.GetItem(measurement.instanceId);
     if(!item || item->uri()!=Tone3000Preset::PLUGIN_URI)throw PiPedalStateException("Measured plugin is no longer present.");
+    // The Amp output is the neutral handoff; whole-rig matching belongs at Cab.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+    if(item->tone3000DerivedSource() && item->tone3000DerivedSource()->stage_!="cab")
+        throw PiPedalArgumentException("Match the whole experimental rig at the Cab stage; Amp output is a neutral handoff.");
     const double before=Tone3000Preset::OutputLevel(item->lv2State());
     const double after=Tone3000Stage::MatchedOutput(measurement.result,target,before);
     Tone3000StatePatch patch;patch.outputLevel_=after;
@@ -2985,6 +2994,10 @@ Tone3000CurrentStateResult PiPedalModel::GetTone3000CurrentState(const Tone3000C
  */
 bool PiPedalModel::SetTone3000CurrentState(int64_t clientId,const Tone3000CurrentStateEdit& request) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    const auto* derivedTarget=pedalboard.GetItem(request.instanceId_);
+    if(derivedTarget&&derivedTarget->tone3000DerivedSource()
+        &&(request.followDefaults_.value_or(false)||request.applyDefaults_.value_or(false)))
+        throw PiPedalArgumentException("Derived amp/cab stages are pinned off device defaults.");
     // Completion capture may change the revision; reject stale edits before cloning it.
     // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STABILITY-REVIEW] [7.23]
     CancelTone3000StageJobs();
@@ -3014,6 +3027,52 @@ bool PiPedalModel::SetTone3000CurrentState(int64_t clientId,const Tone3000Curren
 /** Saved choices contain revisions, never model bytes or current capture.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-18] [DES-STAGE-BANK] [7.4]
  */
+/** Saved-only preview; does not capture, recall or publish any audio state.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [DES-PITCH-LV2] [7.34]
+ */
+Tone3000MixMatchPreview PiPedalModel::GetTone3000MixMatchPreview(const Tone3000MixMatchRequest& request) try {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    Tone3000MixMatch::Validate(request,false);
+    BankFile bank;storage.GetBankFile(request.bankId_,&bank);
+    const auto& source=bank.getItem(request.presetId_).preset();
+    auto prepared=Tone3000MixMatch::Prepare(source,request,false);
+    for(const auto& item:prepared.board.items())if(!item.isEmpty()&&!pluginHost.GetPluginInfo(item.uri()))
+        prepared.preview.warnings_.push_back("A required plugin is not installed; creation will be refused: "+item.pluginName());
+    return prepared.preview;
+}catch(const fs::filesystem_error&){throw PiPedalStateException("Saved source storage is unavailable; refresh before retrying.");}
+
+/** Reconcile the receipt first, then re-read and validate before publication.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [DES-PITCH-LV2] [DES-SEC] [7.34]
+ */
+Tone3000MixMatchResult PiPedalModel::CreateTone3000MixMatch(int64_t clientId,const Tone3000MixMatchRequest& request) try {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    Tone3000MixMatch::Validate(request,true);
+    storage.CheckTone3000MixMatchPublication();
+    std::optional<Tone3000MixMatchResult> receipt;size_t banks=0,presets=0;
+    // Bank names are editable; immutable item receipts must survive a rename.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+    for(const auto& entry:storage.GetBanks().entries()){
+        if(++banks>1000)throw PiPedalStateException("Too many experimental banks to reconcile safely.");
+        BankFile bank;storage.GetBankFile(entry.instanceId(),&bank);presets+=bank.presets().size();
+        if(presets>2000)throw PiPedalStateException("Too many experimental presets to reconcile safely.");
+        if(auto existing=Tone3000MixMatch::Receipt(entry.instanceId(),bank,request)){
+            if(receipt)throw PiPedalStateException("Creation receipt is ambiguous across experimental banks; inspect before retrying.");
+            receipt=std::move(existing);
+        }
+    }
+    if(receipt)return *receipt;
+    BankFile sourceBank;storage.GetBankFile(request.bankId_,&sourceBank);
+    const auto& source=sourceBank.getItem(request.presetId_).preset();
+    auto prepared=Tone3000MixMatch::Prepare(source,request,true);
+    for(const auto& item:prepared.board.items())if(!item.isEmpty()&&!pluginHost.GetPluginInfo(item.uri()))
+        throw PiPedalStateException("Every required plugin must be installed before creating the experimental copy.");
+    BankFile bank;bank.name(std::string(Tone3000MixMatch::BANK_PREFIX)+request.name_);
+    const auto presetId=bank.addPreset(prepared.board);bank.selectedPreset(presetId);
+    const auto bankId=storage.SaveTone3000MixMatchBank(bank);
+    FireBanksChanged(clientId);
+    return {bankId,presetId,prepared.ampInstanceId,prepared.cabInstanceId,prepared.pitchInstanceId,prepared.board.name(),request.expectedRevision_,false};
+}catch(const fs::filesystem_error&){throw PiPedalStateException("Experimental storage unavailable; inspect banks before retrying.");}
+
 Tone3000PerformanceSources PiPedalModel::GetTone3000PerformanceSources() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     Tone3000PerformanceSources result;
@@ -3155,6 +3214,8 @@ Tone3000ImportResult PiPedalModel::ImportTone3000Preset(int64_t clientId,const T
         BankFile bank; storage.GetBankFile(request.bankId_,&bank);
         board=bank.getItem(request.presetId_).preset().DeepCopy();
         item=board.GetItem(request.instanceId_);
+        if (item && item->tone3000DerivedSource())
+            throw PiPedalArgumentException("Derived stages cannot be replaced by ordinary Library Update; recreate explicitly from source.");
         if (!item || item->uri()!=Tone3000Preset::PLUGIN_URI
             || (item->tone3000SourceKey()!=request.key_ && item->tone3000SourceKey()!=source.entry.key_
                 && std::find(source.aliases.begin(),source.aliases.end(),item->tone3000SourceKey())==source.aliases.end())

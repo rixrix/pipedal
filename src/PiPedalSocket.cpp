@@ -1414,6 +1414,21 @@ public:
         Reply(replyTo,"getTone3000PerformanceSources",model.GetTone3000PerformanceSources());
     }
     REGISTER_MESSAGE_HANDLER(getTone3000PerformanceSources)
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [DES-MIX-MATCH] [7.34] */
+    void handle_getTone3000MixMatchPreview(int replyTo,json_reader* reader){
+        const auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        Tone3000MixMatch::ValidateJson(raw,false);
+        std::istringstream stream(raw.to_string());json_reader checked(stream);Tone3000MixMatchRequest request;checked.read(&request);
+        Reply(replyTo,"getTone3000MixMatchPreview",model.GetTone3000MixMatchPreview(request));
+    }
+    REGISTER_MESSAGE_HANDLER(getTone3000MixMatchPreview)
+    void handle_createTone3000MixMatch(int replyTo,json_reader* reader){
+        const auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        Tone3000MixMatch::ValidateJson(raw,true);
+        std::istringstream stream(raw.to_string());json_reader checked(stream);Tone3000MixMatchRequest request;checked.read(&request);
+        Reply(replyTo,"createTone3000MixMatch",model.CreateTone3000MixMatch(clientId,request));
+    }
+    REGISTER_MESSAGE_HANDLER(createTone3000MixMatch)
     void handle_getTone3000PerformanceBank(int replyTo,json_reader* reader){
         const auto raw=Tone3000Operations::ReadRequestJson(*reader);
         Reply(replyTo,"getTone3000PerformanceBank",model.GetTone3000PerformanceBank(Tone3000Performance::BankId(raw)));

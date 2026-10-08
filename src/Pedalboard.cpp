@@ -555,6 +555,20 @@ JSON_MAP_BEGIN(PedalboardItem)
     JSON_MAP_REFERENCE(PedalboardItem,tone3000SourceKey)
     JSON_MAP_REFERENCE(PedalboardItem,tone3000SourceHash)
     JSON_MAP_REFERENCE(PedalboardItem,tone3000FollowDefaults)
+    JSON_MAP_REFERENCE(PedalboardItem,tone3000DerivedSource)
+JSON_MAP_END()
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34] */
+JSON_MAP_BEGIN(Tone3000DerivedSource)
+    JSON_MAP_REFERENCE(Tone3000DerivedSource,bankId)
+    JSON_MAP_REFERENCE(Tone3000DerivedSource,presetId)
+    JSON_MAP_REFERENCE(Tone3000DerivedSource,instanceId)
+    JSON_MAP_REFERENCE(Tone3000DerivedSource,revision)
+    JSON_MAP_REFERENCE(Tone3000DerivedSource,ampBlockId)
+    JSON_MAP_REFERENCE(Tone3000DerivedSource,cabBlockId)
+    JSON_MAP_REFERENCE(Tone3000DerivedSource,stage)
+    JSON_MAP_REFERENCE(Tone3000DerivedSource,creationId)
+    JSON_MAP_REFERENCE(Tone3000DerivedSource,requestHash)
 JSON_MAP_END()
 
 
@@ -583,4 +597,3 @@ JSON_MAP_BEGIN(Snapshot)
     JSON_MAP_REFERENCE(Snapshot,color)
     JSON_MAP_REFERENCE(Snapshot,values)
 JSON_MAP_END()
-

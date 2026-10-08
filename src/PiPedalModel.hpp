@@ -48,6 +48,7 @@
 #include "Tone3000Operations.hpp"
 #include "AudioRecoveryPolicy.hpp"
 #include "Tone3000Performance.hpp"
+#include "Tone3000MixMatch.hpp"
 #include "Tone3000Stage.hpp"
 
 namespace pipedal
@@ -428,6 +429,9 @@ namespace pipedal
         Tone3000PerformanceSources GetTone3000PerformanceSources();
         Tone3000PerformanceResult GetTone3000PerformanceBank(int64_t bankId);
         Tone3000PerformanceResult CreateTone3000PerformanceBank(int64_t clientId,const Tone3000PerformanceRequest& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [DES-PITCH-LV2] [7.34] */
+        Tone3000MixMatchPreview GetTone3000MixMatchPreview(const Tone3000MixMatchRequest& request);
+        Tone3000MixMatchResult CreateTone3000MixMatch(int64_t clientId,const Tone3000MixMatchRequest& request);
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [7.1] */
         Tone3000PreviewResult GetTone3000PresetPreview(const Tone3000PreviewRequest& request);
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
