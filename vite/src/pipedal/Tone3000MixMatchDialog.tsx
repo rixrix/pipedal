@@ -30,6 +30,7 @@ export default function Tone3000MixMatchDialog({ selection, onClose }: {
     const [connected, setConnected] = useState(model.state.get() === State.Ready);
     const [loaded, setLoaded] = useState(false), [loadError, setLoadError] = useState(""), [loading, setLoading] = useState(false);
     const [ownerChanged, setOwnerChanged] = useState(false);
+    const loadFlight = useRef<{ session: Tone3000MixMatchSession } | null>(null);
     const owner = useRef<{ bank: number; preset: number; snapshot: number; board: unknown } | null>(null);
     const ownerCurrent = () => !!owner.current && owner.current.bank === model.banks.get().selectedBank
         && owner.current.preset === model.presets.get().selectedInstanceId
@@ -45,6 +46,10 @@ export default function Tone3000MixMatchDialog({ selection, onClose }: {
             setConnected(state === State.Ready);
             if (state !== State.Ready) {
                 current.invalidate(); setOwnerChanged(true);
+                if (loadFlight.current?.session === current) {
+                    loadFlight.current = null; setLoading(false);
+                    model.showAlert("Loading may have completed. Check which rig is playing before loading again.");
+                }
                 setLoadError("Connection interrupted. Inspect the experimental bank before trying again.");
             }
         };
@@ -52,6 +57,10 @@ export default function Tone3000MixMatchDialog({ selection, onClose }: {
         model.state.addOnChangedHandler(connection); model.banks.addOnChangedHandler(changed);
         model.presets.addOnChangedHandler(changed); model.selectedSnapshot.addOnChangedHandler(changed); model.pedalboard.addOnChangedHandler(changed);
         return () => {
+            if (loadFlight.current?.session === current) {
+                loadFlight.current = null;
+                model.showAlert("Loading may have completed. Check which rig is playing before loading again.");
+            }
             if (current.invalidate()) model.showAlert("Creation may have completed. Inspect TONE3000 Experiments banks before creating another copy.");
             model.state.removeOnChangedHandler(connection); model.banks.removeOnChangedHandler(changed);
             model.presets.removeOnChangedHandler(changed); model.selectedSnapshot.removeOnChangedHandler(changed); model.pedalboard.removeOnChangedHandler(changed);
@@ -74,21 +83,34 @@ export default function Tone3000MixMatchDialog({ selection, onClose }: {
         });
     };
     const create = () => {
+        const current = session.current;
+        if (!confirmed || model.state.get() !== State.Ready || current.state.loading || current.state.creating
+            || current.state.uncertain || current.state.receipt || !current.state.preview || loadFlight.current) return;
         owner.current = { bank: model.banks.get().selectedBank, preset: model.presets.get().selectedInstanceId,
             snapshot: model.selectedSnapshot.get(), board: model.pedalboard.get() };
         setOwnerChanged(model.presets.get().presetChanged);
-        void session.current.create(confirmed, request => model.createTone3000MixMatch(request));
+        void current.create(confirmed, request => model.createTone3000MixMatch(request));
     };
     const load = async () => {
-        if (!read.receipt || !connected || loading || ownerChanged || !ownerCurrent()) return;
-        const current = session.current;
-        setLoading(true); setLoadError("");
-        try { await model.loadTone3000Preset(read.receipt.bankId, read.receipt.presetId); if (session.current === current) setLoaded(true); }
-        catch (error) { if (session.current === current) setLoadError(String(error) + " Check which rig is playing before loading again."); }
-        finally { if (session.current === current) setLoading(false); }
+        const current = session.current, receipt = current.state.receipt;
+        if (!receipt || receipt !== read.receipt || model.state.get() !== State.Ready
+            || loadFlight.current || loaded || ownerChanged || !ownerCurrent()) return;
+        const flight = { session: current };
+        loadFlight.current = flight; setLoading(true); setLoadError("");
+        try {
+            await model.loadTone3000Preset(receipt.bankId, receipt.presetId,
+                { requireClean: true, expectedBankId: owner.current!.bank, expectedPresetId: owner.current!.preset });
+            if (loadFlight.current === flight && session.current === current) setLoaded(true);
+        } catch (error) {
+            if (loadFlight.current === flight && session.current === current)
+                setLoadError(String(error) + " Check which rig is playing before loading again.");
+        } finally {
+            if (loadFlight.current === flight) { loadFlight.current = null; setLoading(false); }
+        }
     };
+    const close = () => { if (!loadFlight.current) onClose(); };
     const locked = read.creating || read.uncertain || !!read.receipt;
-    return <DialogEx tag="tone3000MixMatch" open={!!selection} onClose={onClose} fullWidth maxWidth="md"
+    return <DialogEx tag="tone3000MixMatch" open={!!selection} onClose={close} fullWidth maxWidth="md"
         sx={{ "& .MuiDialog-paper": { m: { xs: 0, sm: 4 }, width: { xs: "100%", sm: "calc(100% - 64px)" }, maxHeight: { xs: "100%", sm: "calc(100% - 64px)" } },
             "& .MuiButton-root": { minHeight: 44, whiteSpace: "normal" } }}>
         <DialogTitle>Mix & match · Experimental copy</DialogTitle>
@@ -115,7 +137,7 @@ export default function Tone3000MixMatchDialog({ selection, onClose }: {
             {loaded && <Alert severity="info">Experimental copy loaded. Test at your usual sample rate and buffers before taking it to a gig.</Alert>}
         </Stack></DialogContent>
         <DialogActions sx={{ flexWrap: "wrap", gap: 1, px: 2 }}>
-            <Button onClick={onClose}>Close</Button>
+            <Button disabled={loading} onClick={close}>Close</Button>
             {read.receipt ? <Button variant="contained" disabled={!connected || loading || loaded || ownerChanged || !ownerCurrent()} onClick={() => { void load(); }}>{loading ? "Loading…" : "Load experimental copy"}</Button>
                 : <Button variant="contained" disabled={!connected || !confirmed || !read.preview || read.loading || locked} onClick={create}>{read.creating ? "Creating…" : "Create separate copy"}</Button>}
         </DialogActions>

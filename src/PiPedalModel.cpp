@@ -3241,6 +3241,9 @@ Tone3000ImportResult PiPedalModel::ImportTone3000Preset(int64_t clientId,const T
 void PiPedalModel::LoadTone3000Preset(int64_t clientId,const Tone3000LoadRequest& request)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    // Keep the ownership check and target recall in the same model transaction.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+    Tone3000Library::ValidateLoadOwner(request,storage.GetBanks().selectedBank(),storage.GetCurrentPresetId(),hasPresetChanged);
     const auto& index=storage.GetBanks().getBankIndexEntry(request.bankId_);
     if (!Tone3000Library::IsToneBank(index.name())) throw PiPedalArgumentException("Choose a TONE3000 bank entry.");
     BankFile bank; storage.GetBankFile(request.bankId_,&bank);

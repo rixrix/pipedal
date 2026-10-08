@@ -4002,8 +4002,9 @@ export class PiPedalModel //implements PiPedalModel
     /** Load through the host's normal saved-bank/preset lifecycle.
      * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-11] [DES-LIBRARY] [3.10]
      */
-    loadTone3000Preset(bankId: number, presetId: number): Promise<void> {
-        return nullCast(this.webSocket).request<void>("loadTone3000Preset", { bankId, presetId });
+    loadTone3000Preset(bankId: number, presetId: number,
+        ownership?: { requireClean: true; expectedBankId: number; expectedPresetId: number }): Promise<void> {
+        return nullCast(this.webSocket).request<void>("loadTone3000Preset", { bankId, presetId, ...ownership });
     }
 
     /** Upload a complete rig to the server's validated, fixed preset store.

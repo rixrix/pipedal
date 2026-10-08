@@ -44,6 +44,10 @@ struct Tone3000ImportResult {
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
 struct Tone3000LoadRequest {
     int64_t bankId_ = -1, presetId_ = -1;
+    // Opt-in ownership guard; ordinary Library Load keeps its existing behavior.
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+    bool requireClean_ = false;
+    int64_t expectedBankId_ = -1, expectedPresetId_ = -1;
     DECLARE_JSON_MAP(Tone3000LoadRequest);
 };
 /** A read-only request identifies sources and saved targets, never paths.
@@ -92,6 +96,8 @@ public:
      */
     Tone3000PreviewResult Preview(const Tone3000PreviewRequest& request, const Pedalboard* savedTarget = nullptr) const;
     static void ValidatePreviewRequestJson(const json_variant& request);
+    static void ValidateLoadOwner(const Tone3000LoadRequest& request,
+                                  int64_t currentBankId, int64_t currentPresetId, bool dirty);
     static bool ValidFilename(const std::string& filename);
     static bool IsToneBank(const std::string& name);
     static bool HasSnapshotOverrides(const Pedalboard& board, int64_t instanceId);

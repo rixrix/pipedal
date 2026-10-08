@@ -269,3 +269,22 @@ TEST_CASE("Tone3000 preview JSON validates identifiers without coercion", "[gig_
         REQUIRE_THROWS(Tone3000Library::ValidatePreviewRequestJson(parse(invalid)));
     REQUIRE_THROWS(Tone3000Library::ValidatePreviewRequestJson(parse("{\"key\":\""+std::string(4097,'x')+"\"}")));
 }
+
+/** Opt-in refusal must leave normal Library Load semantics intact.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+ */
+TEST_CASE("Tone3000 experimental Load checks clean current ownership", "[gig_rig][gig_rig_library][gig_rig_load_owner][Build]"){
+    auto read=[](const std::string& text){std::istringstream stream(text);json_reader reader(stream);Tone3000LoadRequest request;reader.read(&request);REQUIRE(reader.is_complete());return request;};
+    const auto ordinary=read("{\"bankId\":42,\"presetId\":1}");
+    REQUIRE_FALSE(ordinary.requireClean_);REQUIRE(ordinary.expectedBankId_==-1);REQUIRE(ordinary.expectedPresetId_==-1);
+    REQUIRE_NOTHROW(Tone3000Library::ValidateLoadOwner(ordinary,6,26,true));
+    const auto guarded=read("{\"bankId\":42,\"presetId\":1,\"requireClean\":true,\"expectedBankId\":6,\"expectedPresetId\":26}");
+    REQUIRE(guarded.requireClean_);REQUIRE(guarded.expectedBankId_==6);REQUIRE(guarded.expectedPresetId_==26);
+    REQUIRE_NOTHROW(Tone3000Library::ValidateLoadOwner(guarded,6,26,false));
+    REQUIRE_THROWS(Tone3000Library::ValidateLoadOwner(guarded,6,26,true));
+    REQUIRE_THROWS(Tone3000Library::ValidateLoadOwner(guarded,7,26,false));
+    REQUIRE_THROWS(Tone3000Library::ValidateLoadOwner(guarded,6,27,false));
+    const auto roundTrip=read(Json(guarded));REQUIRE(Json(roundTrip)==Json(guarded));
+    for(auto invalid:{-1LL,9007199254740992LL}){auto request=guarded;request.expectedBankId_=invalid;REQUIRE_THROWS(Tone3000Library::ValidateLoadOwner(request,6,26,false));request=guarded;request.expectedPresetId_=invalid;REQUIRE_THROWS(Tone3000Library::ValidateLoadOwner(request,6,26,false));}
+    for(const auto& invalid:{"{\"requireClean\":null}","{\"requireClean\":\"true\"}","{\"expectedBankId\":6.5}","{\"expectedPresetId\":null}"})REQUIRE_THROWS(read(invalid));
+}

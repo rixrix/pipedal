@@ -55,6 +55,9 @@ JSON_MAP_END()
 JSON_MAP_BEGIN(Tone3000LoadRequest)
 JSON_MAP_REFERENCE(Tone3000LoadRequest, bankId)
 JSON_MAP_REFERENCE(Tone3000LoadRequest, presetId)
+JSON_MAP_REFERENCE(Tone3000LoadRequest, requireClean)
+JSON_MAP_REFERENCE(Tone3000LoadRequest, expectedBankId)
+JSON_MAP_REFERENCE(Tone3000LoadRequest, expectedPresetId)
 JSON_MAP_END()
 
 JSON_MAP_BEGIN(Tone3000PreviewRequest)
@@ -279,6 +282,22 @@ Tone3000Library::Source Tone3000Library::Resolve(const std::string& key,const st
         return source;
     }
     throw PiPedalArgumentException("Preset source is unavailable; refresh the library.");
+}
+
+/** Called under the model mutex before any target lookup, bank switch or recall.
+ * This checks model ownership/dirty state, not unobserved audio-thread mutations.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+ */
+void Tone3000Library::ValidateLoadOwner(const Tone3000LoadRequest& request,
+                                      int64_t currentBankId,int64_t currentPresetId,bool dirty){
+    if(!request.requireClean_)return;
+    constexpr int64_t maxId=9007199254740991LL;
+    if(request.expectedBankId_<0||request.expectedBankId_>maxId
+        ||request.expectedPresetId_<0||request.expectedPresetId_>maxId)
+        throw PiPedalArgumentException("A valid current rig identity is required for experimental Load.");
+    if(request.expectedBankId_!=currentBankId||request.expectedPresetId_!=currentPresetId)
+        throw PiPedalStateException("The playing rig changed; review it before loading the experimental copy.");
+    if(dirty)throw PiPedalStateException("Save or discard the playing rig's changes before loading the experimental copy.");
 }
 
 /** Reject unknown, duplicate (at the socket reader), oversized and coerced fields.

@@ -359,3 +359,39 @@ test("Library search finds renamed saved copies and Load retains the selected sa
     f.button("Load").props.onClick(); assert.deepEqual(f.writes[0].args, [6, 26]);
     f.writes[0].pending.resolve(); await flush(); f.unmount();
 });
+
+/** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.36] */
+async function prepareMixMatchLoad() {
+    const f = fixture("MixMatch"); f.render(); f.button("Review saved rig").props.onClick(); await flush(); f.render();
+    f.all().find(node => node.type === "FormControlLabel" && node.props.label.startsWith("I confirm")).props.control.props.onChange({ target: { checked: true } }); f.render();
+    f.button("Create separate copy").props.onClick(); const request = f.writes[0].args[0];
+    f.writes[0].pending.resolve({ bankId: 42, presetId: 1, ampInstanceId: 8, cabInstanceId: 9, pitchInstanceId: 7,
+        name: request.name, sourceRevision: "saved", qualified: false });
+    await flush(); f.render(); return f;
+}
+test("Mix & match Load has synchronous ownership and close guards; obsolete Create cannot replace owner", async () => {
+    const f = await prepareMixMatchLoad();
+    const button = f.button("Load experimental copy"), close = f.button("Close"), dialog = f.dialog();
+    button.props.onClick(); button.props.onClick(); assert.equal(f.writes.length, 2);
+    assert.deepEqual(JSON.parse(JSON.stringify(f.writes[1].args)), [42, 1, { requireClean: true, expectedBankId: 6, expectedPresetId: 20 }]);
+    close.props.onClick(); dialog.props.onClose(); assert.equal(f.closes(), 0);
+    f.writes[1].pending.resolve(); await flush(); f.render();
+    assert.equal(f.button("Load experimental copy").props.disabled, true);
+    f.button("Close").props.onClick(); assert.equal(f.closes(), 1); f.unmount(); assert.equal(f.alerts.length, 0);
+});
+test("Mix & match forced unmount or disconnect during Load retains uncertainty and ignores late result", async () => {
+    for (const disconnect of [false, true]) {
+        const f = await prepareMixMatchLoad(); f.button("Load experimental copy").props.onClick();
+        if (disconnect) { f.model.state.set(2); f.render(); f.model.state.set(1); f.render(); }
+        else { f.setOpen(false); f.setOpen(true); f.render(); }
+        assert.equal(f.alerts.length, 1); assert.match(f.alerts[0], /Loading may have completed/);
+        f.writes[1].pending.resolve(); await flush(); f.render();
+        assert.ok(!f.all().some(node => node.type === "Alert" && children(node).some(value => value === "Experimental copy loaded. Test at your usual sample rate and buffers before taking it to a gig.")));
+        assert.equal(f.writes.length, 2); f.unmount(); assert.equal(f.alerts.length, 1);
+    }
+});
+test("Mix & match stale Load callback cannot authorize a disconnected load", async () => {
+    const f = await prepareMixMatchLoad(), load = f.button("Load experimental copy");
+    f.model.state.set(2); load.props.onClick(); await flush(); assert.equal(f.writes.length, 1);
+    f.render(); f.unmount(); assert.equal(f.alerts.length, 0);
+});
