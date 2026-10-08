@@ -1,7 +1,7 @@
 // Copyright (c) 2026 PiPedal contributors
 // SPDX-License-Identifier: MIT
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useCallback, useEffect, useRef, useState } from "react";
 import Accordion from "@mui/material/Accordion";
 import AccordionDetails from "@mui/material/AccordionDetails";
 import AccordionSummary from "@mui/material/AccordionSummary";
@@ -17,6 +17,8 @@ import Switch from "@mui/material/Switch";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import Tone3000TouchEditor from "./Tone3000TouchEditor";
 import type { Tone3000BlockFocus } from "./Tone3000BlockFocus";
 import JackHostStatus from "./JackHostStatus";
 import { PiPedalModelFactory, State } from "./PiPedalModel";
@@ -68,19 +70,73 @@ function useHostValue<T>(property: ObservableProperty<T>): T {
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-13] [DES-OPERATE] [3.13]
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [7.14]
  */
-function NumberField({ label, value, min, max, step = .01, onChange }: {
-    label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void;
+const DraftTouchContext = createContext({ enabled: false, scopeKey: "" });
+
+/** Draft-only touch dispatch retains the original Apply boundary.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-13] [DES-TOUCH-EDITOR] [7.27] */
+function NumberField({ label, value, min, max, step = .01, logarithmic = false, onChange }: {
+    label: string; value: number; min: number; max: number; step?: number; logarithmic?: boolean; onChange: (value: number) => void;
 }) {
     const [text, setText] = useState(() => tone3000FormatNumber(value, step));
+    const [touchOpen, setTouchOpen] = useState(false);
+    const touch = useMediaQuery("(any-pointer: coarse), (max-width: 600px)");
+    const owner = useContext(DraftTouchContext);
+    const model = PiPedalModelFactory.getInstance();
+    const ownerRef = useRef(owner); ownerRef.current = owner;
+    const opening = useRef<string | null>(null);
+    const key = () => JSON.stringify([ownerRef.current.scopeKey, model.banks.get().selectedBank,
+        model.presets.get().selectedInstanceId, model.selectedSnapshot.get(), model.state.get()]);
+    const close = () => { opening.current = null; setTouchOpen(false); };
+    const touchChange = (next: number) => {
+        if (!ownerRef.current.enabled || opening.current !== key() || model.state.get() !== State.Ready) return;
+        emitted.current = next;
+        setText(tone3000FormatNumber(next, step));
+        onChange(next);
+    };
+    useEffect(() => { close(); }, [owner.scopeKey, owner.enabled]);
+    useEffect(() => {
+        if (!touchOpen) return;
+        const changed = () => { if (opening.current !== key()) close(); };
+        model.state.addOnChangedHandler(changed);
+        model.banks.addOnChangedHandler(changed);
+        model.presets.addOnChangedHandler(changed);
+        model.selectedSnapshot.addOnChangedHandler(changed);
+        let initial = true;
+        const boardChanged = () => { if (initial) { initial = false; return; } close(); };
+        model.pedalboard.addOnChangedHandler(boardChanged);
+        return () => {
+            model.state.removeOnChangedHandler(changed); model.banks.removeOnChangedHandler(changed);
+            model.presets.removeOnChangedHandler(changed); model.selectedSnapshot.removeOnChangedHandler(changed);
+            model.pedalboard.removeOnChangedHandler(boardChanged);
+        };
+    }, [touchOpen, model]);
     const focused = useRef(false);
     const emitted = useRef(value);
     useEffect(() => {
         // An authoritative Refresh/replacement must discard even a focused local draft.
         if (!focused.current || !tone3000SameDraftNumber(value, emitted.current)) {
             setText(tone3000FormatNumber(value, step));
+            if (!tone3000SameDraftNumber(value, emitted.current)) close();
             emitted.current = value;
         }
     }, [value, step]);
+    if (touch) return <Box sx={{ minWidth: 0, width: "100%" }}>
+        <Typography component="span" variant="caption" color="text.secondary">{label}</Typography>
+        <Button variant="outlined" aria-label={"Adjust " + label} disabled={!owner.enabled || !Number.isFinite(value)}
+            onClick={() => { opening.current = key(); setTouchOpen(true); }}
+            sx={{ display: "flex", justifyContent: "space-between", width: "100%", minHeight: 44, textTransform: "none", color: "text.primary", borderColor: "divider" }}>
+            {tone3000FormatNumber(value, step)}<Typography component="span" variant="caption" color="text.secondary">Adjust</Typography>
+        </Button>
+        <Tone3000TouchEditor open={touchOpen} label={label} value={value} min={min} max={max} step={step}
+            scopeKey={owner.scopeKey} disabled={!owner.enabled}
+            format={v => tone3000FormatNumber(v, step)}
+            {...(logarithmic && min > 0 ? {
+                valueToRange: (v: number) => Math.log(v / min) / Math.log(max / min),
+                rangeToValue: (r: number) => min * Math.pow(max / min, r)
+            } : {})}
+            scope="Tap Apply to hear changes, then Save preset."
+            onChange={touchChange} onCommit={touchChange} onClose={close} />
+    </Box>;
     return <TextField size="small" type="text" label={label} value={text}
         onFocus={() => { focused.current = true; }}
         onBlur={() => { focused.current = false; }}
@@ -184,10 +240,10 @@ function BlockCard({ block, onChange, expanded, onToggle }: { block: Tone3000Blo
                                         .map(type => <MenuItem key={type} value={type}>{type}</MenuItem>)}
                                 </TextField>
                                 <NumberField label={"Band " + (index + 1) + " frequency (Hz)"} value={band.freqHz} min={20} max={20000}
-                                    step={1} onChange={freqHz => changeBand(index, { freqHz })} />
+                                    step={1} logarithmic onChange={freqHz => changeBand(index, { freqHz })} />
                                 <NumberField label={"Band " + (index + 1) + " gain (dB)"} value={band.gainDb} min={-15} max={15}
                                     step={.1} onChange={gainDb => changeBand(index, { gainDb })} />
-                                <NumberField label={"Band " + (index + 1) + " Q"} value={band.q} min={.1} max={10}
+                                <NumberField label={"Band " + (index + 1) + " Q"} value={band.q} min={.1} max={10} logarithmic
                                     onChange={q => changeBand(index, { q })} />
                             </Box>)}
                         </Stack>
@@ -413,7 +469,9 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     });
     const validCalibration = (value: number) => Number.isFinite(value) && value >= -60 && value <= 60;
 
-    return <Stack className="t3k-rig-panel" spacing={1.5} sx={{ px: 1, minWidth: 0, maxWidth: 1100,
+    return <DraftTouchContext.Provider value={{ enabled: active && connected && !busy && !waiting && !stale,
+        scopeKey: JSON.stringify([instanceId, section, rig?.revision, profileId, defaults?.revision]) }}>
+        <Stack className="t3k-rig-panel" spacing={1.5} sx={{ px: 1, minWidth: 0, maxWidth: 1100,
         "& .MuiButton-root": { whiteSpace: "normal", minHeight: 44 },
         "& .MuiFormControl-root": { maxWidth: "100%", minWidth: 0 } }}>
         {rig && draft && <Box ref={actionBar} role="region" aria-label={section === "Blocks" ? "Apply block changes" : "Apply rig settings"}
@@ -535,5 +593,5 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                 </Stack>}
             </Box>
         </>}
-    </Stack>;
+    </Stack></DraftTouchContext.Provider>;
 }

@@ -34,7 +34,8 @@ import Select from '@mui/material/Select';
 import Switch from '@mui/material/Switch';
 import Utility from './Utility';
 import MenuItem from '@mui/material/MenuItem';
-import { PiPedalModel, PiPedalModelFactory } from './PiPedalModel';
+import Tone3000TouchEditor from "./Tone3000TouchEditor";
+import { PiPedalModel, PiPedalModelFactory, State } from './PiPedalModel';
 import DialIcon from './svg/fx_dial.svg?react';
 import { isDarkMode } from './DarkMode';
 
@@ -156,11 +157,15 @@ export interface PluginControlProps extends WithStyles<typeof pluginControlStyle
     /** T3K-only equal cells; stock controls keep their existing presentation.
      * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-VISUAL-ALIGN] [7.16] */
     uniformLayout?: boolean;
+    /** Explicit Patch setter opt-in; ordinary controls retain their native editor.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-TOUCH-EDITOR] [7.27] */
+    touchEdit?: { step: number; live: boolean; ready: boolean; logarithmic?: boolean };
 }
 export type PluginControlState = {
     error: boolean;
     editFocused: boolean;
     previewValue?: string;
+    touchEditorOpen?: boolean;
 };
 
 export interface CustomPluginControlProps extends WithStyles<typeof pluginControlStyles> {
@@ -286,7 +291,57 @@ const PluginControl =
             }
 
             componentWillUnmount() {
+                this.removeTouchListeners();
+                this.touchContext = undefined;
                 this.hideZoomedControl();
+            }
+            private touchContext?: string;
+            private touchSubscriptions: (() => void)[] = [];
+
+            /** Reject stale queued gestures before any setter can run.
+             * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-TOUCH-EDITOR] [7.27] */
+            touchCurrent(): boolean {
+                return this.touchContext !== undefined && this.touchContext === this.inputContextKey()
+                    && this.model.state.get() === State.Ready
+                    && this.model.pedalboard.get().tryGetItem(this.props.instanceId)?.uri === "https://www.tone3000.com/plugin";
+            }
+            removeTouchListeners(): void {
+                this.touchSubscriptions.splice(0).forEach(remove => remove());
+            }
+            closeTouchEditor(): void {
+                this.touchContext = undefined;
+                this.removeTouchListeners();
+                this.setState({ touchEditorOpen: false });
+            }
+            /** Subscribe only for the editor session; transitions invalidate synchronously.
+             * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-TOUCH-EDITOR] [7.27] */
+            openTouchEditor(): void {
+                if (!this.props.touchEdit?.ready || this.model.state.get() !== State.Ready
+                    || this.model.pedalboard.get().tryGetItem(this.props.instanceId)?.uri !== "https://www.tone3000.com/plugin") return;
+                this.removeTouchListeners();
+                this.touchContext = this.inputContextKey();
+                this.setState({ touchEditorOpen: true });
+                const changed = () => { if (!this.touchCurrent()) this.closeTouchEditor(); };
+                for (const observable of [this.model.state, this.model.banks, this.model.presets, this.model.selectedSnapshot]) {
+                    observable.addOnChangedHandler(changed);
+                    this.touchSubscriptions.push(() => observable.removeOnChangedHandler(changed));
+                }
+                // Full graph replacement also invalidates same-ID/same-preset edits.
+                let initial = true;
+                const boardChanged = () => {
+                    if (initial) { initial = false; return; }
+                    this.closeTouchEditor();
+                };
+                this.model.pedalboard.addOnChangedHandler(boardChanged);
+                this.touchSubscriptions.push(() => this.model.pedalboard.removeOnChangedHandler(boardChanged));
+            }
+            /** Touch values already use the physical UiControl adapter, as native entry does.
+             * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-16] [DES-TOUCH-EDITOR] [7.27] */
+            touchChange(value: number, commit: boolean): void {
+                if (!this.touchCurrent() || !this.props.touchEdit?.ready || !Number.isFinite(value)) return;
+                const control = this.props.uiControl;
+                if (!control || value < control.min_value || value > control.max_value) return;
+                if (commit || this.props.touchEdit.live) this.props.onChange(value);
             }
             inputChanged: boolean = false;
             private inputContext?: string;
@@ -302,6 +357,10 @@ const PluginControl =
              * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MOBILE-ENTRY] [7.12]
              */
             componentDidUpdate(previous: PluginControlProps): void {
+                if (this.state.touchEditorOpen && (!this.touchCurrent()
+                    || previous.instanceId !== this.props.instanceId
+                    || previous.uiControl?.symbol !== this.props.uiControl?.symbol
+                    || previous.touchEdit?.step !== this.props.touchEdit?.step)) this.closeTouchEditor();
                 const input = this.inputRef.current;
                 const control = this.props.uiControl;
                 if (!input || !control) return;
@@ -1178,6 +1237,27 @@ const PluginControl =
                                         <Typography variant="caption" display="block" textAlign="center" noWrap style={{
                                             width: "100%", ...(uniform ? { fontSize: "12.8px" } : {})
                                         }}> {switchText} </Typography>
+                                    ) : this.props.touchEdit && (isMobileDevice() || window.matchMedia("(max-width: 600px)").matches) ? (
+                                        <>
+                                            <Button variant="text" size="small" aria-label={"Adjust " + control.name}
+                                                disabled={!this.props.touchEdit.ready}
+                                                onClick={() => this.openTouchEditor()}
+                                                sx={{ minWidth: 60, minHeight: 44, p: 0, textTransform: "none", color: "text.secondary",
+                                                    borderBottom: 1, borderColor: "divider", borderRadius: 0, fontSize: "0.8rem" }}>
+                                                {this.formatDisplayValue(control, value)}
+                                            </Button>
+                                            <Tone3000TouchEditor open={!!this.state.touchEditorOpen} label={control.name}
+                                                scopeKey={this.touchContext} value={value} min={control.min_value} max={control.max_value}
+                                                step={this.props.touchEdit.step} format={v => this.formatDisplayValue(control, v)}
+                                                valueToRange={v => this.props.touchEdit?.logarithmic && control.min_value > 0
+                                                    ? Math.log(v / control.min_value) / Math.log(control.max_value / control.min_value) : control.valueToRange(v)}
+                                                rangeToValue={r => this.props.touchEdit?.logarithmic && control.min_value > 0
+                                                    ? control.min_value * Math.pow(control.max_value / control.min_value, r) : control.rangeToValue(r)}
+                                                scope={this.props.touchEdit.live ? "Changes are live. Save preset to keep them."
+                                                    : "Release to apply. Save preset to keep it."}
+                                                onChange={this.props.touchEdit.live ? v => this.touchChange(v, false) : undefined} onCommit={v => this.touchChange(v, true)}
+                                                onClose={() => this.closeTouchEditor()} />
+                                        </>
                                     ) : (
                                         <div>
                                             <Input
