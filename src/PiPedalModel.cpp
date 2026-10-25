@@ -2852,6 +2852,7 @@ json_variant PiPedalModel::StartTone3000Stage(int64_t clientId,const Tone3000Sta
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if(closed || !audioHost)throw PiPedalStateException("Audio is unavailable.");
     const auto command=Tone3000Stage::Command(request.command_);
+    if(command==TONE3000_STAGE_BLOCK_EDIT&&request.payload_.empty())throw PiPedalArgumentException("Choose a block control value.");
     const auto current=GetTone3000CurrentState({request.instanceId_});
     if(current.revision_!=request.expectedRevision_)throw PiPedalStateException("Rig changed; refresh before soundcheck.");
     if(command==TONE3000_STAGE_MEASURE_OUTPUT && (hasPresetChanged || current.hasSnapshotOverrides_))
@@ -2884,6 +2885,29 @@ json_variant PiPedalModel::StartTone3000Stage(int64_t clientId,const Tone3000Sta
     tone3000StageJobs[request.instanceId_]=std::move(job);
     ScheduleTone3000StagePoll(request.instanceId_,token);
     return tone3000StageJobs[request.instanceId_].result;
+}
+/** Forward an owned preview/final value to the one active native block gesture.
+ * The terminal poll performs the single opaque-state capture and dirty mark.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIVE-BLOCK] [7.39]
+ */
+json_variant PiPedalModel::UpdateTone3000Stage(int64_t clientId,const Tone3000StageUpdateRequest& request) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    auto found=tone3000StageJobs.find(request.instanceId_);
+    if(found==tone3000StageJobs.end()||found->second.clientId!=clientId||found->second.token!=(uint64_t)request.token_
+       ||found->second.command!=TONE3000_STAGE_BLOCK_EDIT)
+        throw PiPedalStateException("Block edit expired; refresh the current rig.");
+    auto& job=found->second;
+    if(job.bankId!=storage.GetBanks().selectedBank()||job.presetId!=storage.GetCurrentPresetId()||!audioHost) {
+        CancelTone3000StageJobs(clientId);throw PiPedalStateException("The playing rig changed; block edit was cancelled.");
+    }
+    if(Tone3000Stage::Terminal(job.result))throw PiPedalStateException("Block edit already finished.");
+    const auto accepted=audioHost->SubmitTone3000Stage(job.instanceId,job.token,job.command,request.payload_);
+    if(accepted<0) {
+        if(accepted==TONE3000_STAGE_BUSY)throw PiPedalStateException("The block edit is still processing; retry the latest value.");
+        throw PiPedalStateException("TONE3000 rejected the block control value.");
+    }
+    json_variant result=json_variant::parse("{\"state\":\"queued\"}");
+    result["token"]=static_cast<double>(job.token);return result;
 }
 json_variant PiPedalModel::PollTone3000Stage(int64_t clientId,const Tone3000StageRequest& request,bool cancel) {
     std::lock_guard<std::recursive_mutex> lock(mutex);

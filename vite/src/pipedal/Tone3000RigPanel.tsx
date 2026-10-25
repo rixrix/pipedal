@@ -30,6 +30,8 @@ import type { Tone3000Block, Tone3000CurrentState, Tone3000Defaults, Tone3000Def
 import { tone3000GearLabel } from "./Tone3000Gear";
 import { tone3000DraftNumber, tone3000FormatNumber, tone3000SameDraftNumber } from "./Tone3000MobileLayout";
 import { tone3000RigDraftChanged, tone3000ProfileDraftChanged, tone3000EditDrafts } from "./Tone3000EditState";
+import { Tone3000BlockLiveEdit } from "./Tone3000BlockLiveEdit";
+import type { Tone3000BlockEditPayload } from "./Tone3000BlockLiveEdit";
 
 const rowStyle = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 };
 
@@ -73,10 +75,11 @@ function useHostValue<T>(property: ObservableProperty<T>): T {
  */
 const DraftTouchContext = createContext({ enabled: false, scopeKey: "" });
 
-/** Draft-only touch dispatch retains the original Apply boundary.
+/** Touch editing preserves each field's live or explicit-Apply boundary.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-13] [DES-TOUCH-EDITOR] [7.27] */
-function NumberField({ label, value, min, max, step = .01, logarithmic = false, onChange }: {
-    label: string; value: number; min: number; max: number; step?: number; logarithmic?: boolean; onChange: (value: number) => void;
+function NumberField({ label, value, min, max, step = .01, logarithmic = false, onChange, onPreview, onCommit, live = false }: {
+    label: string; value: number; min: number; max: number; step?: number; logarithmic?: boolean;
+    onChange?: (value: number) => void; onPreview?: (value: number) => void; onCommit?: (value: number) => void; live?: boolean;
 }) {
     const [text, setText] = useState(() => tone3000FormatNumber(value, step));
     const [touchOpen, setTouchOpen] = useState(false);
@@ -85,14 +88,25 @@ function NumberField({ label, value, min, max, step = .01, logarithmic = false, 
     const model = PiPedalModelFactory.getInstance();
     const ownerRef = useRef(owner); ownerRef.current = owner;
     const opening = useRef<string | null>(null);
+    const previewed = useRef(false), committed = useRef(false);
     const key = () => JSON.stringify([ownerRef.current.scopeKey, model.banks.get().selectedBank,
         model.presets.get().selectedInstanceId, model.selectedSnapshot.get(), model.state.get()]);
-    const close = () => { opening.current = null; setTouchOpen(false); };
+    const close = (commitPreview = false) => {
+        if (commitPreview && live && previewed.current && !committed.current && onCommit
+            && Number.isFinite(emitted.current) && emitted.current >= min && emitted.current <= max) onCommit(emitted.current);
+        previewed.current = false; committed.current = false; opening.current = null; setTouchOpen(false);
+    };
     const touchChange = (next: number) => {
         if (!ownerRef.current.enabled || opening.current !== key() || model.state.get() !== State.Ready) return;
         emitted.current = next;
+        previewed.current = true; committed.current = false;
         setText(tone3000FormatNumber(next, step));
-        onChange(next);
+        (onPreview ?? onChange)?.(next);
+    };
+    const touchCommit = (next: number) => {
+        if (!ownerRef.current.enabled || opening.current !== key() || model.state.get() !== State.Ready) return;
+        emitted.current = next; committed.current = true; setText(tone3000FormatNumber(next, step));
+        (onCommit ?? onChange)?.(next);
     };
     useEffect(() => { close(); }, [owner.scopeKey, owner.enabled]);
     useEffect(() => {
@@ -124,7 +138,7 @@ function NumberField({ label, value, min, max, step = .01, logarithmic = false, 
     if (touch) return <Box sx={{ minWidth: 0, width: "100%" }}>
         <Typography component="span" variant="caption" color="text.secondary">{label}</Typography>
         <Button variant="outlined" aria-label={"Adjust " + label} disabled={!owner.enabled || !Number.isFinite(value)}
-            onClick={() => { opening.current = key(); setTouchOpen(true); }}
+            onClick={() => { opening.current = key(); previewed.current = false; committed.current = false; setTouchOpen(true); }}
             sx={{ display: "flex", justifyContent: "space-between", width: "100%", minHeight: 44, textTransform: "none", color: "text.primary", borderColor: "divider" }}>
             {tone3000FormatNumber(value, step)}<Typography component="span" variant="caption" color="text.secondary">Adjust</Typography>
         </Button>
@@ -135,12 +149,13 @@ function NumberField({ label, value, min, max, step = .01, logarithmic = false, 
                 valueToRange: (v: number) => Math.log(v / min) / Math.log(max / min),
                 rangeToValue: (r: number) => min * Math.pow(max / min, r)
             } : {})}
-            scope="Tap Apply to hear changes, then Save preset."
-            onChange={touchChange} onCommit={touchChange} onClose={close} />
+            scope={live ? "Changes are heard now. Save preset to keep them." : "Tap Apply to hear changes, then Save preset."}
+            onChange={touchChange} onCommit={touchCommit} onClose={() => close(true)} />
     </Box>;
     return <TextField size="small" type="text" label={label} value={text}
         onFocus={() => { focused.current = true; }}
-        onBlur={() => { focused.current = false; }}
+        onBlur={() => { focused.current = false; if (onCommit && Number.isFinite(emitted.current)
+            && emitted.current >= min && emitted.current <= max) onCommit(emitted.current); }}
         onKeyDown={event => {
             if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                 event.preventDefault(); (event.target as HTMLInputElement).blur();
@@ -148,10 +163,11 @@ function NumberField({ label, value, min, max, step = .01, logarithmic = false, 
         }}
         onChange={event => {
             setText(event.target.value);
-            // Only edit the local rig/profile draft. Apply remains the server mutation boundary.
+            // Draft fields remain local; live block fields preview only complete bounded values.
             const number = tone3000DraftNumber(event.target.value);
-            emitted.current = number;
-            onChange(number);
+            const valid = Number.isFinite(number) && number >= min && number <= max;
+            if (!live || valid) emitted.current = number;
+            if (!onPreview || valid) (onPreview ?? onChange)?.(number);
         }}
         error={!Number.isFinite(value) || value < min || value > max}
         inputProps={{ inputMode: min < 0 ? "text" : step >= 1 ? "numeric" : "decimal", enterKeyHint: "done" }}
@@ -181,11 +197,18 @@ function ProcessingFields({ value, onChange }: { value: Pick<Tone3000Defaults,
 /** Model names and saved block controls use a bounded server-side state projection.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-13] [DES-OPERATE] [3.13]
  */
-function BlockCard({ block, onChange, expanded, onToggle }: { block: Tone3000Block;
-    onChange: (block: Tone3000Block) => void; expanded: boolean; onToggle: (expanded: boolean) => void }) {
-    const change = (patch: Partial<Tone3000Block>) => onChange({ ...block, ...patch });
-    const changeBand = (index: number, patch: Partial<Tone3000EqBand>) =>
-        change({ eq: { ...block.eq, bands: block.eq.bands.map((band, i) => i === index ? { ...band, ...patch } : band) } });
+function BlockCard({ block, onStaged, onLive, expanded, onToggle }: { block: Tone3000Block;
+    onStaged: (block: Tone3000Block) => void;
+    onLive: (block: Tone3000Block, identity: string, payload: Tone3000BlockEditPayload, commit: boolean) => void;
+    expanded: boolean; onToggle: (expanded: boolean) => void }) {
+    const staged = (patch: Partial<Tone3000Block>) => onStaged({ ...block, ...patch });
+    const live = (patch: Partial<Tone3000Block>, identity: string, payload: Tone3000BlockEditPayload, commit: boolean) =>
+        onLive({ ...block, ...patch }, identity, payload, commit);
+    const liveBand = (index: number, patch: Partial<Tone3000EqBand>, commit: boolean) => {
+        const band = { ...block.eq.bands[index], ...patch };
+        live({ eq: { ...block.eq, bands: block.eq.bands.map((before, i) => i === index ? band : before) } },
+            `${block.blockId}:eqBand:${index}`, { blockId: block.blockId, kind: "eqBand", index, band }, commit);
+    };
     return <Accordion disableGutters variant="outlined" expanded={expanded}
         onChange={(_event, open) => onToggle(open)} TransitionProps={{ unmountOnExit: false }}
         sx={{ minWidth: 0, borderRadius: 1, boxShadow: "none", "&:before": { display: "none" } }}>
@@ -205,20 +228,26 @@ function BlockCard({ block, onChange, expanded, onToggle }: { block: Tone3000Blo
             </Typography> : <>
                 <Box className="t3k-field-grid" sx={blockGridStyle}>
                     <FormControlLabel label="Block enabled" control={<Switch checked={block.enabled}
-                        onChange={(_event, enabled) => change({ enabled })} />} />
+                        onChange={(_event, enabled) => live({ enabled }, `${block.blockId}:enabled`,
+                            { blockId: block.blockId, kind: "param", param: "enabled", value: enabled ? 1 : 0 }, true)} />} />
                     {block.type === "nam" && <>
                         <FormControlLabel label="Normalize" control={<Switch checked={block.normalize}
-                            onChange={(_event, normalize) => change({ normalize })} />} />
+                            onChange={(_event, normalize) => live({ normalize }, `${block.blockId}:normalize`,
+                                { blockId: block.blockId, kind: "param", param: "normalize", value: normalize ? 1 : 0 }, true)} />} />
                         <TextField select size="small" label="Requested NAM size" value={block.slimSize >= .5 ? 1 : 0}
-                            onChange={event => change({ slimSize: Number(event.target.value) })}>
+                            onChange={event => staged({ slimSize: Number(event.target.value) })}>
                             <MenuItem value={0}>A2-Lite</MenuItem><MenuItem value={1}>A2-Full</MenuItem>
                         </TextField>
                     </>}
                     <NumberField label="Input gain (dB)" value={(block.inputGain - .5) * 48} min={-24} max={24} step={.1}
-                        onChange={gainDb => change({ inputGain: gainDb / 48 + .5 })} />
+                        live onPreview={gainDb => { const value=gainDb/48+.5;live({inputGain:value},`${block.blockId}:inputGain`,{blockId:block.blockId,kind:"param",param:"inputGain",value},false); }}
+                        onCommit={gainDb => { const value=gainDb/48+.5;live({inputGain:value},`${block.blockId}:inputGain`,{blockId:block.blockId,kind:"param",param:"inputGain",value},true); }} />
                     <NumberField label="Output gain (dB)" value={(block.outputGain - .5) * 48} min={-24} max={24} step={.1}
-                        onChange={gainDb => change({ outputGain: gainDb / 48 + .5 })} />
-                    <NumberField label="Mix (%)" value={block.mix * 100} min={0} max={100} step={1} onChange={percent => change({ mix: percent / 100 })} />
+                        live onPreview={gainDb => { const value=gainDb/48+.5;live({outputGain:value},`${block.blockId}:outputGain`,{blockId:block.blockId,kind:"param",param:"outputGain",value},false); }}
+                        onCommit={gainDb => { const value=gainDb/48+.5;live({outputGain:value},`${block.blockId}:outputGain`,{blockId:block.blockId,kind:"param",param:"outputGain",value},true); }} />
+                    <NumberField label="Mix (%)" value={block.mix * 100} min={0} max={100} step={1} live
+                        onPreview={percent => { const value=percent/100;live({mix:value},`${block.blockId}:mix`,{blockId:block.blockId,kind:"param",param:"mix",value},false); }}
+                        onCommit={percent => { const value=percent/100;live({mix:value},`${block.blockId}:mix`,{blockId:block.blockId,kind:"param",param:"mix",value},true); }} />
                 </Box>
                 {block.type === "nam" && block.capabilityUnknown && <Typography variant="caption" color="text.secondary">
                     Size is the saved request. Models without switchable tiers may ignore it.
@@ -229,23 +258,25 @@ function BlockCard({ block, onChange, expanded, onToggle }: { block: Tone3000Blo
                         <Stack spacing={2}>
                             <Box className="t3k-field-grid" sx={fieldGridStyle}>
                                 <FormControlLabel label="EQ enabled" control={<Switch checked={block.eq.enabled}
-                                    onChange={(_event, enabled) => change({ eq: { ...block.eq, enabled } })} />} />
+                                    onChange={(_event, enabled) => live({ eq: { ...block.eq, enabled } }, `${block.blockId}:eqEnabled`,
+                                        { blockId: block.blockId, kind: "eqEnabled", value: enabled }, true)} />} />
                                 <FormControlLabel label="EQ before model" control={<Switch checked={block.eq.pre}
-                                    onChange={(_event, pre) => change({ eq: { ...block.eq, pre } })} />} />
+                                    onChange={(_event, pre) => live({ eq: { ...block.eq, pre } }, `${block.blockId}:eqPre`,
+                                        { blockId: block.blockId, kind: "eqPre", value: pre }, true)} />} />
                             </Box>
                             {block.eq.bands.map((band, index) => <Box key={index} className="t3k-field-grid" sx={fieldGridStyle}>
                                 <Typography variant="body2" sx={{ gridColumn: "1 / -1" }}>Band {index + 1}</Typography>
                                 <TextField select size="small" label={"Band " + (index + 1) + " type"}
-                                    value={band.type} onChange={event => changeBand(index, { type: event.target.value })}>
+                                    value={band.type} onChange={event => liveBand(index, { type: event.target.value }, true)}>
                                     {(index === 0 ? ["lowcut", "lowshelf"] : index === 5 ? ["highshelf", "highcut"] : ["bell"])
                                         .map(type => <MenuItem key={type} value={type}>{type}</MenuItem>)}
                                 </TextField>
                                 <NumberField label={"Band " + (index + 1) + " frequency (Hz)"} value={band.freqHz} min={20} max={20000}
-                                    step={1} logarithmic onChange={freqHz => changeBand(index, { freqHz })} />
+                                    step={1} logarithmic live onPreview={freqHz => liveBand(index, { freqHz }, false)} onCommit={freqHz => liveBand(index, { freqHz }, true)} />
                                 <NumberField label={"Band " + (index + 1) + " gain (dB)"} value={band.gainDb} min={-15} max={15}
-                                    step={.1} onChange={gainDb => changeBand(index, { gainDb })} />
+                                    step={.1} live onPreview={gainDb => liveBand(index, { gainDb }, false)} onCommit={gainDb => liveBand(index, { gainDb }, true)} />
                                 <NumberField label={"Band " + (index + 1) + " Q"} value={band.q} min={.1} max={10} logarithmic
-                                    onChange={q => changeBand(index, { q })} />
+                                    live onPreview={q => liveBand(index, { q }, false)} onCommit={q => liveBand(index, { q }, true)} />
                             </Box>)}
                         </Stack>
                     </AccordionDetails>
@@ -317,6 +348,9 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
     const [waiting, setWaiting] = useState(false);
     const [connected, setConnected] = useState(model.state.get() === State.Ready);
     const [recoveryNotice, setRecoveryNotice] = useState("");
+    const [liveBusy, setLiveBusy] = useState(false);
+    const liveEditing = useRef(false);
+    const liveEdit = useRef(new Tone3000BlockLiveEdit());
     const blockCards = useRef(new Map<string, HTMLDivElement>());
     const actionBar = useRef<HTMLDivElement>(null);
     const lastFocused = useRef<Tone3000BlockFocus | null>(null);
@@ -374,6 +408,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         && ownership.current.key === key && ownerKey() === key && ownership.current.epoch === epoch
         && model.pedalboard.get().tryGetItem(instanceId)?.uri === "https://www.tone3000.com/plugin", [model, instanceId, ownerKey]);
     const invalidateCapture = useCallback(() => {
+        liveEdit.current.stop(); liveEditing.current = false; setLiveBusy(false);
         ++ownership.current.epoch; ++generation.current; ++operationGeneration.current;
         captureReadyRef.current = false; captureOwner.current = null; setCaptureReady(false);
         saveCancellation.current?.();
@@ -394,6 +429,19 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         staleRef.current = false; waitingRef.current = false;
         publishDraft();
     }, [publishDraft]);
+    const acceptLiveRig = useCallback((value: Tone3000CurrentState) => {
+        const previous = draftRef.current;
+        const summary = previous ? { ...value.summary, blocks: value.summary.blocks.map(block => {
+            const before = previous.blocks.find(candidate => candidate.blockId === block.blockId);
+            return before ? { ...block, slimSize: before.slimSize } : block;
+        }) } : value.summary;
+        rigRef.current = value; draftRef.current = summary; followRef.current = value.followDefaults;
+        setRig(value); setDraft(summary); setFollow(value.followDefaults);
+        rigDirty.current = tone3000RigDraftChanged(value, summary, value.followDefaults);
+        setStale(false); setWaiting(false); staleRef.current = false; waitingRef.current = false;
+        captureReadyRef.current = true; captureOwner.current = { ...ownership.current }; setCaptureReady(true);
+        publishDraft();
+    }, [publishDraft]);
     const acceptDefaults = useCallback((value: Tone3000DefaultsResult) => {
         defaultsRef.current = value; profileIdRef.current = value.activeProfile; profileDraftRef.current = value.defaults;
         setDefaults(value); setProfileId(value.activeProfile); setProfileDraft(value.defaults);
@@ -412,7 +460,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         rigDirty.current = false;
     }, [instanceId]);
     const refresh = useCallback(async (reset = false) => {
-        if (!alive.current || working.current || model.state.get() !== State.Ready) return;
+        if (!alive.current || working.current || liveEditing.current || model.state.get() !== State.Ready) return;
         const request = ++generation.current;
         const key = ownerKey(), epoch = ownership.current.epoch;
         const current = () => request === generation.current && ownerCurrent(key, epoch);
@@ -466,6 +514,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         const boardChanged = () => {
             if (initial) { initial = false; return; }
             if (ownerKey() !== ownership.current.key) { changed(); return; }
+            if (liveEditing.current) return;
             invalidateCapture();
             if (activeRef.current) void refresh();
         };
@@ -498,7 +547,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
             window.clearInterval(timer);
         };
     }, [active, refresh, model, invalidateCapture]);
-    useEffect(() => () => { ++operationGeneration.current; working.current = false; saveCancellation.current?.(); }, []);
+    useEffect(() => () => { liveEdit.current.stop(); ++operationGeneration.current; working.current = false; saveCancellation.current?.(); }, []);
 
     /** Interrupted generations cannot accept replies or release a newer action's guard.
      * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
@@ -532,6 +581,50 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
         rigDirty.current = tone3000RigDraftChanged(rigRef.current, value, policy);
         publishDraft();
         setDraft(value); setFollow(policy);
+    };
+    /** Runtime-safe fields update the native processor immediately. The local
+     * baseline advances optimistically so only NAM size remains an Apply draft.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIVE-BLOCK] [7.39]
+     */
+    const liveBlock = (updated: Tone3000Block, identity: string, payload: Tone3000BlockEditPayload, commit: boolean) => {
+        const baseline = rigRef.current, desired = draftRef.current;
+        if (!baseline || !desired || working.current || staleRef.current || !captureReadyRef.current) return;
+        const key = ownerKey(), epoch = ownership.current.epoch;
+        const current = () => ownerCurrent(key, epoch);
+        const reconcile = async (message: string, failure = "") => {
+            try {
+                const value = await model.getTone3000CurrentState(instanceId);
+                if (!current()) return;
+                liveEditing.current = false; setLiveBusy(false); acceptLiveRig(value);
+                if (failure) setError(failure); else { setError(""); setNotice(message); }
+            } catch (error) {
+                if (current()) {
+                    liveEditing.current = false; setLiveBusy(false); captureReadyRef.current = false;
+                    captureOwner.current = null; setCaptureReady(false); setError(failure || String(error));
+                }
+            }
+        };
+        const api = {
+            revision: () => rigRef.current?.revision ?? "",
+            start: (revision: string, body: object) => model.startTone3000Stage(instanceId, revision, "block", body),
+            update: (token: number, body: object) => model.updateTone3000Stage(instanceId, token, body),
+            poll: (token: number) => model.pollTone3000Stage(instanceId, token),
+            cancel: (token: number) => model.cancelTone3000Stage(instanceId, token),
+            current,
+            done: () => { void reconcile("Change is live. Save preset to keep it."); },
+            fail: (message: string) => { window.setTimeout(() => { void reconcile("", message); }, 300); }
+        };
+        if (!liveEdit.current.dispatch(identity, payload, commit, api)) {
+            setError("Finish the current TONE3000 control before changing another one."); return;
+        }
+        liveEditing.current = true; setLiveBusy(true); setError(""); setNotice("");
+        const nextDraft = { ...desired, blocks: desired.blocks.map(block => block.blockId === updated.blockId ? updated : block) };
+        const nextBaselineBlock = { ...updated, slimSize: baseline.summary.blocks.find(block => block.blockId === updated.blockId)?.slimSize ?? updated.slimSize };
+        const nextBaseline = { ...baseline, summary: { ...baseline.summary,
+            blocks: baseline.summary.blocks.map(block => block.blockId === updated.blockId ? nextBaselineBlock : block) } };
+        draftRef.current = nextDraft; rigRef.current = nextBaseline;
+        rigDirty.current = tone3000RigDraftChanged(nextBaseline, nextDraft, followRef.current);
+        setDraft(nextDraft); setRig(nextBaseline); publishDraft();
     };
     const changeFollow = (policy: boolean) => {
         if (working.current || !ownerCurrent(renderedOwner.key, renderedOwner.epoch)) return;
@@ -629,15 +722,16 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
             <Stack spacing={.5}>
                 <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1 }}>
                 <Button variant="contained" aria-label={section === "Blocks" ? "Apply block changes" : "Apply rig settings"} sx={{ alignSelf: "flex-start" }}
-                    disabled={busy || waiting || !connected || stale || !capturedHere || !rigDirty.current
+                    disabled={busy || liveBusy || waiting || !connected || stale || !capturedHere || !rigDirty.current
                         || (section === "Blocks" ? !tone3000ValidBlocks(draft.blocks) : !validCalibration(draft.inputCalibrationLevel))}
                     onClick={() => { void apply(); }}>Apply</Button>
-                <Button variant="outlined" aria-label="Save preset" disabled={busy || waiting || !connected || stale || !capturedHere
+                <Button variant="outlined" aria-label="Save preset" disabled={busy || liveBusy || waiting || !connected || stale || !capturedHere
                     || pendingSections.length > 0 || rigDirty.current || profileDirty.current || !presets.presetChanged}
                     onClick={() => { void savePreset(); }}>Save</Button>
                 </Stack>
                 <Typography role="status" variant="body2" color="text.secondary">
                     {!connected ? "Reconnect to the Pi before applying changes."
+                        : liveBusy ? "Changing the playing TONE3000 block…"
                         : busy ? busyLabel + "…"
                         : waiting ? "Checking your changes. Wait before saving."
                         : stale ? "This rig changed elsewhere. Refresh before applying."
@@ -663,7 +757,7 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                 {rig.summary.stereoEnabled ? " · Stereo chain" : " · Single chain"}</Typography>
             {rig.hasSnapshotOverrides && <Alert severity="info">Snapshots retain their saved tone versions. These edits do not replace other snapshots.</Alert>}
             <Typography variant="body2" color="text.secondary">
-                Apply may briefly reload this TONE3000 instance. Library Update replaces local tone/block tweaks from your T3K source.
+                Power, Normalize, gain, mix and EQ are heard immediately; Save preset keeps them. NAM size and rig settings use Apply. Library Update replaces local tone/block tweaks from your T3K source.
             </Typography>
             <Box component="fieldset" disabled={busy || waiting || !connected} sx={{ border: 0, p: 0, m: 0, minWidth: 0 }}>
                 {section === "Blocks" ? <Stack spacing={2}>
@@ -673,7 +767,8 @@ export default function Tone3000RigPanel({ instanceId, section, active, focusedB
                         sx={{ minWidth: 0, outline: "none" }}>
                         <BlockCard block={block} expanded={expandedBlock === block.blockId}
                             onToggle={open => setExpandedBlock(open ? block.blockId : null)}
-                            onChange={updated => edit({ blocks: draft.blocks.map(before => before.blockId === updated.blockId ? updated : before) })} />
+                            onStaged={updated => edit({ blocks: draft.blocks.map(before => before.blockId === updated.blockId ? updated : before) })}
+                            onLive={liveBlock} />
                     </Box>)}
                     {draft.blocks.some(block => block.type === "insert") && <Typography variant="caption" color="text.secondary">
                         Empty slots are omitted. Add, replace or reorder blocks in TONE3000, then use Library Update.

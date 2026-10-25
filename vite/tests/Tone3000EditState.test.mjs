@@ -10,7 +10,7 @@ const ts = require("typescript"), { build } = require("esbuild");
 const path = name => fileURLToPath(new URL("../src/pipedal/" + name, import.meta.url));
 const compiled = async name => (await build({ entryPoints: [path(name)], bundle: true, write: false,
     platform: "node", format: "cjs", logLevel: "silent" })).outputFiles[0].text;
-const modules = await Promise.all(["ObservableProperty.tsx", "Tone3000Rig.ts", "Tone3000EditState.ts"].map(compiled));
+const modules = await Promise.all(["ObservableProperty.tsx", "Tone3000Rig.ts", "Tone3000EditState.ts", "Tone3000BlockLiveEdit.ts"].map(compiled));
 const ast = ts.createSourceFile("panel.tsx", readFileSync(path("Tone3000RigPanel.tsx"), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declaration = name => ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name).getText(ast);
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
@@ -111,9 +111,9 @@ test("real draft comparison never erases NaN/infinity, including identical neste
 test("actual panel Restore of all block/EQ drafts clears unapplied status without Apply or Save", async () => {
     const f = fixture(); await f.flush(); assert.match(f.status(), /^Saved/);
     const edited = structuredClone(f.block); edited.mix = .8; edited.eq.bands[0].q = NaN;
-    f.blockControl().props.onChange(edited); f.render(); assert.match(f.status(), /Unapplied/);
+    f.blockControl().props.onStaged(edited); f.render(); assert.match(f.status(), /Unapplied/);
     assert.equal(f.button("Apply block changes").props.disabled, true); assert.equal(f.button("Save preset").props.disabled, true);
-    f.blockControl().props.onChange(structuredClone(f.block)); f.render();
+    f.blockControl().props.onStaged(structuredClone(f.block)); f.render();
     assert.match(f.status(), /^Saved/); assert.equal(f.button("Apply block changes").props.disabled, true);
     assert.deepEqual(f.writes, []); assert.deepEqual(f.saves, []); f.unmount();
 });
@@ -171,7 +171,7 @@ test("actual pending Save/capture cannot survive selection or connection Aâ†’Bâ†
 
 test("actual accepted Apply reconciles a full-board event from observed state and leaves Save separate", async () => {
     const f = fixture(); await f.flush(); const edited = structuredClone(f.block); edited.mix = .8;
-    f.blockControl().props.onChange(edited); f.render(); f.button("Apply block changes").props.onClick();
+    f.blockControl().props.onStaged(edited); f.render(); f.button("Apply block changes").props.onClick();
     assert.equal(f.writes.length, 1); assert.equal(f.writes[0].args[2].blocks[0].mix, .8);
     const read = f.holdRead(); f.model.pedalboard.set({ ...f.model.pedalboard.get() });
     read.reject(Error("Apply accepted; plugin state has not reflected edit yet")); await f.flush(); assert.match(f.status(), /Wait before saving/);
@@ -192,7 +192,7 @@ test("native float32 readback reconciles exact control steps without accepting a
     assert.equal(f.helper(1e40, 2e40), false);
     assert.equal(f.helper(Infinity, Infinity), false);
     const edited = structuredClone(f.block); edited.mix = .99;
-    f.blockControl().props.onChange(edited); f.render(); f.button("Apply block changes").props.onClick();
+    f.blockControl().props.onStaged(edited); f.render(); f.button("Apply block changes").props.onClick();
     const actual = structuredClone(f.current); actual.revision = "native-float"; actual.summary.blocks[0].mix = Math.fround(.99);
     f.setCurrent(actual); f.dirty(); f.model.pedalboard.set({ ...f.model.pedalboard.get() });
     f.writes[0].pending.resolve(true); await f.flush();

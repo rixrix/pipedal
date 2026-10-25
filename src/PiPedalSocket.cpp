@@ -1387,6 +1387,11 @@ public:
         Reply(replyTo,"startTone3000Stage",model.StartTone3000Stage(clientId,Tone3000Stage::Request(raw,false)));
     }
     REGISTER_MESSAGE_HANDLER(startTone3000Stage)
+    void handle_updateTone3000Stage(int replyTo,json_reader* reader) {
+        auto raw=Tone3000Operations::ReadRequestJson(*reader);
+        Reply(replyTo,"updateTone3000Stage",model.UpdateTone3000Stage(clientId,Tone3000Stage::UpdateRequest(raw)));
+    }
+    REGISTER_MESSAGE_HANDLER(updateTone3000Stage)
     void handle_pollTone3000Stage(int replyTo,json_reader* reader) {
         auto raw=Tone3000Operations::ReadRequestJson(*reader);
         Reply(replyTo,"pollTone3000Stage",model.PollTone3000Stage(clientId,Tone3000Stage::Request(raw,true)));

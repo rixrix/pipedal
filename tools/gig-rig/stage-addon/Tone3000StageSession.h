@@ -26,6 +26,8 @@ private:
     void timerCallback() override;
     void parameterChanged(const juce::String&,float) override;
     void cancelNative();
+    bool applyBlockEdit(const juce::var&, bool);
+    void restoreBlockEdit();
     void finish(const juce::String&);
     void publish(juce::DynamicObject::Ptr);
     juce::var runtime();
@@ -44,4 +46,8 @@ private:
     std::atomic<uint64_t> parameterRevision{0};
     std::atomic<bool> ownCompletionWrites{false};
     Tone3000StageMeter meter;
+    juce::String blockEditId, blockEditKind, blockEditParam;
+    int blockEditBand=-1;
+    juce::var blockEditBaseline;
+    bool blockEditCommitted=false;
 };

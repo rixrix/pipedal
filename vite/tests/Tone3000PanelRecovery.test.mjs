@@ -30,6 +30,7 @@ function fixture(kind, section = "Blocks") {
         activeRef: { current: true }, captureReadyRef: { current: false }, captureOwner: { current: null },
         ownership: { current: { key: "", epoch: 0 } }, saveCancellation: { current: null },
         operationLabel: { current: "" }, rigRecovery: { current: false },
+        liveEditing: { current: false }, liveEdit: { current: { stop() {} } },
         draftToken: { current: Symbol("test panel") },
         active: true, open: true, section, instanceId: 1, busy: false, refreshing: false,
         error: "", notice: "", recoveryNotice: "", stale: false, waiting: false, connected: true,
@@ -43,7 +44,7 @@ function fixture(kind, section = "Blocks") {
     Object.assign(context, runModule(editStateCode));
     context.registry = context.tone3000EditDrafts(context);
     for (const name of ["Busy", "Refreshing", "Connected", "PendingLoad", "Preview", "PerformanceOpen", "BundleOpen", "MixMatch", "RecoveryNotice", "Notice", "Error", "Library",
-        "Rig", "Draft", "Follow", "Defaults", "ProfileId", "ProfileDraft", "Status", "Stale", "Waiting", "CaptureReady", "BusyLabel"]) {
+        "Rig", "Draft", "Follow", "Defaults", "ProfileId", "ProfileDraft", "Status", "Stale", "Waiting", "CaptureReady", "BusyLabel", "LiveBusy"]) {
         const key = name[0].toLowerCase() + name.slice(1);
         context["set" + name] = value => {
             context[key] = typeof value === "function" ? value(context[key]) : value;
@@ -102,7 +103,7 @@ function fixture(kind, section = "Blocks") {
         context.renderedOwner = { ...context.ownership.current };
     }
     install("mount", effects.find(effect => effect.getText(source).includes("const connectionChanged")));
-    if (kind === "rig") install("mountDisposal", effects.find(effect => effect.getText(source).includes("() => { ++operationGeneration.current")));
+    if (kind === "rig") install("mountDisposal", effects.find(effect => effect.getText(source).includes("liveEdit.current.stop()")));
     let cleanup = context.mount(), dispose = context.mountDisposal?.();
     return { context, model, reads, writes, uploads, alerts, current, profile,
         setCurrent: value => { currentValue = value; }, setLibrary: value => { libraryValue = value; },

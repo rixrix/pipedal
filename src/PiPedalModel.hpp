@@ -441,6 +441,7 @@ namespace pipedal
         bool SetTone3000CurrentState(int64_t clientId,const Tone3000CurrentStateEdit& request);
         /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5] */
         json_variant StartTone3000Stage(int64_t clientId,const Tone3000StageRequest& request);
+        json_variant UpdateTone3000Stage(int64_t clientId,const Tone3000StageUpdateRequest& request);
         json_variant PollTone3000Stage(int64_t clientId,const Tone3000StageRequest& request,bool cancel=false);
         json_variant ApplyTone3000Level(int64_t clientId,uint64_t token,const std::string& expectedRevision,double targetRmsDb);
         std::vector<uint8_t> ExportTone3000Preset(int64_t bankId,int64_t presetId,int64_t instanceId);

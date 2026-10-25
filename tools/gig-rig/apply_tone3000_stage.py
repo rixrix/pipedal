@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import tempfile
 
-MANIFEST_SHA256 = "a8874d6e0d9b130049e6d935b05c6ee6900fc4560a49d998a06466c27756a488"
+MANIFEST_SHA256 = "891763efad166ec7499564ff18259e03d334a2dc3617f0891ead103d3b475087"
 HERE = Path(__file__).resolve().parent
 class StagePatchError(RuntimeError):
     pass

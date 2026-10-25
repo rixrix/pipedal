@@ -3,7 +3,7 @@ afx: true
 type: JOURNAL
 owner: "@rixrix"
 created_at: "2026-10-03T23:59:54.000Z"
-updated_at: "2026-10-07T13:42:55.000Z"
+updated_at: "2026-10-08T07:49:29.000Z"
 tags: ["tone3000-gig-rig", "journal"]
 ---
 
@@ -364,3 +364,19 @@ Rix reports missing Mix & Match, misleading Rx Library statuses and oversized/in
 Rix reports landscape usability on Fold4/iPhoneXR and requests a live/gig chain-only option. [7.38]/[DES-LANDSCAPE] records the approved design, implementation and exact evidence inside the sprint. Short T3K screens now use parent scrolling with sticky tabs/actions and full-height dialogs; Library extra tools scroll with its body. Local read-only Chain-only/Controls preserves the mounted editor, captured gear and rotation preference, including unfolded landscape. A separately tested browser lifecycle fix removes premature refresh disconnection. All 156 frontend tests/build and actual serving viewport/rotation/refresh checks pass; guarded static publications preserve contemporary owner state. Agent complete, Human phones/controller acceptance and experimental audio gates remain open. No native/audio changes, daemon restart, Git push or release.
 
 Source checkpoints: `fab2a8c` refresh lifecycle, `497327e` landscape layout, `3245ff5` Chain-only.
+
+### 2026-10-08T05:55:00.000Z — Per-block controls are staged rather than live
+
+Rix reports that disabling a displayed T3K block has no audible effect until Apply. Diagnostic trace confirms the current custom panel intentionally edits one local `Tone3000Summary` draft; Apply serializes a state patch, rebuilds the T3K LV2 state and updates the host pedalboard. This same boundary currently covers bypass, normalize, input/output gain, mix and block EQ. It is safe but conflicts with the expected pedal-editor interaction and with T3K's own runtime API: pinned v0.0.12 provides `setBlockParam`, `setBlockEqEnabled`, `setBlockEqPre` and `setBlockEqBand`; its gain/mix paths are smoothed and continuous gestures coalesce revision updates. PiPedal does not yet expose those runtime methods through the bounded T3K bridge, so changing only the React switch would remain a draft or cause full-instance state reloads. No source, plugin, daemon, preset or playing-audio change made during this diagnosis. The sprint needs a Design/Task refinement for an owned live-edit bridge, persistence capture, stale/error recovery and a deliberate staged boundary for discontinuous operations such as NAM Lite/Full retiering and processing/routing changes. Normalize is supported by T3K's runtime block setter and belongs to the live group.
+
+### 2026-10-08T06:28:12.000Z — Live-block candidate complete locally; device boundary held
+
+[7.39]/[DES-LIVE-BLOCK] now implement one owned preview/update/commit Stage gesture for block power, Normalize, gains, mix and EQ, with native baseline restoration on cancel and one opaque-state capture/dirty mark after commit. NAM Lite/Full and rig settings retain Apply. Final audit corrected boolean baseline restoration for cancelled power/Normalize gestures and added a compiled sanitizer harness. Full frontend **160/160** tests/build, **114** gig-rig tests with one skip, final overlay idempotence and **244** clean upstream T3K DSP tests pass; host Linux compilation and actual-device behavior remain pending. Read-only Pi inspection confirms the newly installed stock v0.0.12 user copy cannot shadow the separate `/usr/local` PiPedal integration copy under the configured LV2 path. Both PiPedal services remain active and no device file/service/preset/UI mutation occurred. The observed 64 × 6 session's existing underrun burst is recorded separately from plugin compatibility. Source remains unstaged; stop before Pi build/deployment as Rix requested while testing.
+
+### 2026-10-08T07:49:29.000Z — Live block controls deployed and reversibly qualified
+
+Rix explicitly released the coordinated Pi boundary with “go”. Isolated ARM64 daemon/T3K/UI candidates pass the full pinned DSP suite, focused PiPedal regressions, Pitch checks, frontend suite/build and an actual Lilv-hosted private Stage run. A private whole-system rollback archive and owner snapshot preceded publication. One stale hidden LV2 backup was caught through duplicate discovery and removed from the search path before final start.
+
+Real-service preview/update/cancel restores the exact T3K summary/revision and clean selection. A separate completed gesture returns a captured revision and marks the preset dirty; reloading its existing saved copy restores the original summary/revision and clean state. Final banks, presets, board, defaults and audio settings match the pre-deployment snapshot exactly. The installed daemon/plugin/UI hashes and all private receipts are recorded in [DES-LIVE-BLOCK].
+
+The Jogg encountered USB interface timeout `-110` during rollout and failed with both the old and new daemons. Reboot restored Jogg/SINCO enumeration and unchanged 48 kHz/64×6 audio without fallback; current service status reports zero underruns and zero restarts, with one initial boot recovery line. This is not sustained performance or listening acceptance. [7.39] Agent is complete; physical phone, audible controls, owner Save/recall, A2 Apply and rehearsal remain Human pending. Source remains unstaged as requested.

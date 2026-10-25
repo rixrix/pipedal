@@ -24,6 +24,7 @@ uint32_t Tone3000Stage::Command(const std::string& command) {
     if(command=="level")return TONE3000_STAGE_MEASURE_OUTPUT;
     if(command=="pan")return TONE3000_STAGE_LINKED_PAN;
     if(command=="solo")return TONE3000_STAGE_EXCLUSIVE_SOLO;
+    if(command=="block")return TONE3000_STAGE_BLOCK_EDIT;
     throw PiPedalArgumentException("Unsupported soundcheck command.");
 }
 Tone3000StageRequest Tone3000Stage::Request(const json_variant& value,bool poll) {
@@ -54,6 +55,16 @@ Tone3000StageRequest Tone3000Stage::Request(const json_variant& value,bool poll)
     }
     return result;
 }
+Tone3000StageUpdateRequest Tone3000Stage::UpdateRequest(const json_variant& value) {
+    if(!value.is_object()||value.size()!=3||!value.as_object()->contains("instanceId")
+       ||!value.as_object()->contains("token")||!value.as_object()->contains("payload")||!value["payload"].is_object())
+        throw PiPedalArgumentException("Expected an active block edit update.");
+    Tone3000StageUpdateRequest result;result.instanceId_=Id(value["instanceId"]);result.token_=Id(value["token"]);
+    if(!result.token_)throw PiPedalArgumentException("Invalid block edit token.");
+    result.payload_=value["payload"].to_string();
+    if(result.payload_.empty()||result.payload_.size()>TONE3000_STAGE_MAX_REQUEST)throw PiPedalArgumentException("Block edit exceeds its bound.");
+    return result;
+}
 json_variant Tone3000Stage::Result(const std::string& text) {
     if(text.empty() || text.size()>=TONE3000_STAGE_MAX_RESPONSE)throw PiPedalStateException("Invalid native soundcheck response.");
     std::istringstream stream(text);json_reader reader(stream);
@@ -66,7 +77,7 @@ json_variant Tone3000Stage::Result(const std::string& text) {
     return value;
 }
 bool Tone3000Stage::Terminal(const json_variant& result) {auto state=result["state"].as_string();return state!="queued"&&state!="listening";}
-bool Tone3000Stage::Mutates(uint32_t command) {return command==2||command==3||command==6||command==7;}
+bool Tone3000Stage::Mutates(uint32_t command) {return command==2||command==3||command==6||command==7||command==8;}
 /** Reviewable output-only proposal; clipping and out-of-range gain are refused rather than clamped.
  * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.6]
  */

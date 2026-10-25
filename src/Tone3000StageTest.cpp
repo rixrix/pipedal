@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "catch.hpp"
 #include "Tone3000Stage.hpp"
+#include "../tools/gig-rig/Tone3000StageBridge.hpp"
 #include <limits>
 using namespace pipedal;
 /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [DES-SEC] [7.5] [7.6] */
@@ -14,6 +15,11 @@ TEST_CASE("Soundcheck accepts only identified bounded native commands", "[tone30
     for(const auto& text:{"{\"instanceId\":1,\"token\":0}","{\"instanceId\":1.2,\"token\":1}","{\"instanceId\":1,\"token\":1,\"command\":\"level\"}"})
         CHECK_THROWS(Tone3000Stage::Request(json_variant::parse(text),true));
     CHECK(Tone3000Stage::Request(json_variant::parse("{\"instanceId\":1,\"token\":33}"),true).token_==33);
+    const auto update=Tone3000Stage::UpdateRequest(json_variant::parse("{\"instanceId\":1,\"token\":33,\"payload\":{\"phase\":\"commit\"}}"));
+    CHECK(update.instanceId_==1);CHECK(update.token_==33);CHECK_FALSE(update.payload_.empty());
+    for(const auto& text:{"{\"instanceId\":1,\"token\":0,\"payload\":{}}","{\"instanceId\":1,\"token\":2,\"payload\":[]}","{\"instanceId\":1,\"token\":2,\"payload\":{},\"extra\":1}"})
+        CHECK_THROWS(Tone3000Stage::UpdateRequest(json_variant::parse(text)));
+    CHECK(Tone3000Stage::Command("block")==TONE3000_STAGE_BLOCK_EDIT);CHECK(Tone3000Stage::Mutates(TONE3000_STAGE_BLOCK_EDIT));
     CHECK_THROWS(Tone3000Stage::Command("injected"));
     CHECK(Tone3000Stage::Terminal(Tone3000Stage::Result("{\"state\":\"notApplicable\"}")));
     CHECK_FALSE(Tone3000Stage::Terminal(Tone3000Stage::Result("{\"state\":\"listening\"}")));

@@ -3948,6 +3948,9 @@ export class PiPedalModel //implements PiPedalModel
     startTone3000Stage(instanceId: number, expectedRevision: string, command: Tone3000StageCommand, payload?: object): Promise<Tone3000StageResult> {
         return nullCast(this.webSocket).request<Tone3000StageResult>("startTone3000Stage", { instanceId, expectedRevision, command, ...(payload ? { payload } : {}) });
     }
+    updateTone3000Stage(instanceId: number, token: number, payload: object): Promise<Tone3000StageResult> {
+        return nullCast(this.webSocket).request<Tone3000StageResult>("updateTone3000Stage", { instanceId, token, payload });
+    }
     pollTone3000Stage(instanceId: number, token: number): Promise<Tone3000StageResult> {
         return nullCast(this.webSocket).request<Tone3000StageResult>("pollTone3000Stage", { instanceId, token });
     }

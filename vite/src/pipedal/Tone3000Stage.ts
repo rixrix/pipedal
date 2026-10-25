@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import type { Tone3000Block } from "./Tone3000Rig";
-export type Tone3000StageCommand = "runtime" | "balance" | "align" | "level" | "pan" | "solo";
+export type Tone3000StageCommand = "runtime" | "balance" | "align" | "level" | "pan" | "solo" | "block";
 export interface Tone3000StageRuntimeBlock {
     blockId: string; lane: string; enabled: boolean; loaded?: boolean; modelLoading?: boolean; loadFailed?: boolean;
     requestedSlimSize?: number; a2Known: boolean; a2Supported?: boolean; effectiveSlimKnown: boolean;

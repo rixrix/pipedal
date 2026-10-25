@@ -17,8 +17,8 @@ class StageSessionTokenTests(unittest.TestCase):
         # Compile the actual contiguous arming sequence and first timer guard.
         # Only runtime/applicability context is stubbed; the real RT meter arms
         # and consumes a sample before the injected asynchronous parameter change.
-        begin = source[source.index("// Parameter listeners also run"):
-                       source.index("timerLifetime=retained;startTimer")]
+        begin_start = source.index("// Parameter listeners also run")
+        begin = source[begin_start:source.index("timerLifetime=retained;startTimer", begin_start)]
         guard = source[source.index("if(parameterRevision.load("):
                        source.index("if(command!=TONE3000_STAGE_MEASURE_OUTPUT")]
         harness = r'''
@@ -181,6 +181,76 @@ int main(){
                            capture_output=True, text=True, timeout=60)
             subprocess.run([str(binary)], check=True, capture_output=True, text=True, timeout=10)
 
+    def test_cancel_restores_boolean_and_numeric_block_baselines(self):
+        compiler = shutil.which("clang++") or shutil.which("g++")
+        if not compiler:
+            self.skipTest("A C++ compiler is required for the actual-method harness")
+        source = (Path(__file__).resolve().parent / "stage-addon/Tone3000StageSession.cpp").read_text()
+        restore = source[source.index("void Tone3000StageSession::restoreBlockEdit()"):
+                         source.index("void Tone3000StageSession::begin(")]
+        harness = r'''
+#include <cassert>
+#include <cmath>
+#include <string>
+namespace juce {
+struct String {
+    std::string value;
+    String()=default; String(const char* value):value(value){}
+    bool isEmpty()const{return value.empty();}
+    std::string toStdString()const{return value;}
+    bool operator==(const char* other)const{return value==other;}
+};
+struct var {
+    enum class Type {Void,Bool,Number,Object}; Type type=Type::Void; double value=0;
+    var()=default; var(bool value):type(Type::Bool),value(value?1:0){} var(double value):type(Type::Number),value(value){}
+    static var object(){var result;result.type=Type::Object;return result;}
+    bool isVoid()const{return type==Type::Void;} bool isBool()const{return type==Type::Bool;}
+    bool isObject()const{return type==Type::Object;} operator bool()const{return value!=0;} operator double()const{return value;}
+};
+}
+bool number(const juce::var& value){return value.type==juce::var::Type::Number;}
+bool unit(double value){return std::isfinite(value)&&value>=0&&value<=1;}
+struct Owner {
+    int calls=0;std::string method,param;double value=-1;int index=-1;
+    bool setBlockParam(const std::string&,const juce::String& p,double v){++calls;method="param";param=p.value;value=v;return true;}
+    bool setBlockEqEnabled(const std::string&,bool v){++calls;method="enabled";value=v;return true;}
+    bool setBlockEqPre(const std::string&,bool v){++calls;method="pre";value=v;return true;}
+    bool setBlockEqBand(const std::string&,int i,const juce::var&){++calls;method="band";index=i;return true;}
+};
+class Tone3000StageSession {
+public:
+    void restoreBlockEdit();
+    Owner* owner=nullptr;juce::String blockEditId,blockEditKind,blockEditParam;int blockEditBand=-1;juce::var blockEditBaseline;
+};
+''' + restore + r'''
+int main(){
+    Owner owner;Tone3000StageSession session;session.owner=&owner;session.blockEditId="amp";session.blockEditKind="param";
+    session.blockEditParam="enabled";session.blockEditBaseline=true;session.restoreBlockEdit();
+    assert(owner.calls==1&&owner.method=="param"&&owner.param=="enabled"&&owner.value==1);
+    session.blockEditParam="normalize";session.blockEditBaseline=false;session.restoreBlockEdit();
+    assert(owner.calls==2&&owner.param=="normalize"&&owner.value==0);
+    session.blockEditParam="mix";session.blockEditBaseline=juce::var(.35);session.restoreBlockEdit();
+    assert(owner.calls==3&&owner.param=="mix"&&std::abs(owner.value-.35)<1e-12);
+    session.blockEditParam="mix";session.blockEditBaseline=true;session.restoreBlockEdit();
+    assert(owner.calls==3); // Wrong native baseline type cannot invent a restore value.
+    session.blockEditKind="eqEnabled";session.blockEditBaseline=false;session.restoreBlockEdit();
+    assert(owner.calls==4&&owner.method=="enabled"&&owner.value==0);
+    session.blockEditKind="eqPre";session.blockEditBaseline=true;session.restoreBlockEdit();
+    assert(owner.calls==5&&owner.method=="pre"&&owner.value==1);
+    session.blockEditKind="eqBand";session.blockEditBand=4;session.blockEditBaseline=juce::var::object();session.restoreBlockEdit();
+    assert(owner.calls==6&&owner.method=="band"&&owner.index==4);
+}
+'''
+        temporary_root = "/private/tmp" if Path("/private/tmp").is_dir() else None
+        with tempfile.TemporaryDirectory(dir=temporary_root) as directory:
+            cpp = Path(directory) / "block-restore.cpp"
+            binary = Path(directory) / "block-restore-test"
+            cpp.write_text(harness)
+            subprocess.run([compiler, "-std=c++20", "-O1", "-g", "-fno-fast-math", "-fsanitize=address,undefined",
+                            str(cpp), "-o", str(binary)], check=True,
+                           capture_output=True, text=True, timeout=60)
+            subprocess.run([str(binary)], check=True, capture_output=True, text=True, timeout=10)
+
     def test_completed_cancel_retains_receipt_and_active_cancel_still_queues(self):
         compiler = shutil.which("clang++") or shutil.which("g++")
         if not compiler:
@@ -200,7 +270,8 @@ int main(){
 #include <mutex>
 #include <string>
 namespace juce {
-struct String { static String fromUTF8(const char*,int){return {};} };
+struct String { static String fromUTF8(const char*,int){return {};} void clear(){} };
+struct var {};
 struct MessageManager {
     static inline int queued=0;
     static bool callAsync(std::function<void()>){++queued;return true;}
@@ -217,6 +288,10 @@ public:
     uint32_t command=0;
     bool active=false,cancelRequested=false;
     std::string result;
+    juce::String blockEditId,blockEditKind,blockEditParam;
+    int blockEditBand=-1;
+    juce::var blockEditBaseline;
+    bool blockEditCommitted=false;
 };
 ''' + methods + r'''
 int main(){

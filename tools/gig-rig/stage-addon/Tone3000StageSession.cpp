@@ -11,6 +11,12 @@ namespace {
 juce::DynamicObject::Ptr object() {return new juce::DynamicObject();}
 bool number(const juce::var& value) {return value.isDouble()||value.isInt()||value.isInt64();}
 bool doneState(const juce::String& state) {return state=="done"||state=="timeout"||state=="cancelled"||state=="notApplicable"||state=="failed";}
+bool exact(const juce::DynamicObject& value,std::initializer_list<const char*> fields) {
+    if(value.getProperties().size()!=(int)fields.size())return false;
+    for(auto field:fields)if(!value.hasProperty(field))return false;
+    return true;
+}
+bool unit(double value){return std::isfinite(value)&&value>=0&&value<=1;}
 void finiteField(juce::DynamicObject& obj,const char* name,double value) {
     obj.setProperty(name,std::isfinite(value)?juce::var(value):juce::var());
 }
@@ -34,7 +40,7 @@ void Tone3000StageSession::parameterChanged(const juce::String& id,float) {
 }
 
 int32_t Tone3000StageSession::submit(uint64_t requested,uint32_t operation,const char* payload,uint32_t bytes) {
-    if(!requested||bytes>TONE3000_STAGE_MAX_REQUEST||(!payload&&bytes)||operation<1||operation>7)
+    if(!requested||bytes>TONE3000_STAGE_MAX_REQUEST||(!payload&&bytes)||operation<1||operation>8)
         return TONE3000_STAGE_INVALID;
     if(bytes&&std::memchr(payload,0,bytes))return TONE3000_STAGE_INVALID;
     std::lock_guard lock(mutex);
@@ -46,10 +52,15 @@ int32_t Tone3000StageSession::submit(uint64_t requested,uint32_t operation,const
         // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5]
         if(!active)return 0;
         cancelRequested=true;result.clear();
+    } else if(operation==TONE3000_STAGE_BLOCK_EDIT&&active&&command==operation&&requested==token) {
+        if(!bytes)return TONE3000_STAGE_INVALID;
+        result.clear();
     } else {
         if(active)return TONE3000_STAGE_BUSY;
         if(requested==token)return TONE3000_STAGE_STALE;
         token=requested;command=operation;active=true;cancelRequested=false;result.clear();
+        blockEditId.clear();blockEditKind.clear();blockEditParam.clear();blockEditBand=-1;
+        blockEditBaseline=juce::var();blockEditCommitted=false;
     }
     auto weak=weak_from_this();auto text=juce::String::fromUTF8(payload?payload:"",(int)bytes);
     if(!juce::MessageManager::callAsync([weak,requested,operation,text] {
@@ -89,6 +100,7 @@ void Tone3000StageSession::shutdown() {
 }
 
 void Tone3000StageSession::cancelNative() {
+    if(command==TONE3000_STAGE_BLOCK_EDIT&&!blockEditCommitted)restoreBlockEdit();
     juce::ScopedLock callback(owner->getCallbackLock());
     owner->cancelAutoBalance();owner->cancelAutoOffset();meter.cancel();
 }
@@ -117,6 +129,76 @@ bool Tone3000StageSession::liveStereo(const juce::var& state) const {
     return left&&right;
 }
 
+/** Runtime-safe block edits stay in one native gesture. Only the final commit
+ * becomes a captured PiPedal state; cancellation restores the exact native
+ * value observed before the first preview.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIVE-BLOCK] [7.39]
+ */
+bool Tone3000StageSession::applyBlockEdit(const juce::var& argument,bool first) {
+    auto* obj=argument.getDynamicObject();
+    if(!obj||!argument["phase"].isString()||!argument["blockId"].isString()||!argument["kind"].isString())return false;
+    const auto phase=argument["phase"].toString(), id=argument["blockId"].toString(), kind=argument["kind"].toString();
+    if((phase!="preview"&&phase!="commit")||id.isEmpty()||id.length()>128)return false;
+    auto state=owner->getChainState(-1);juce::var row;
+    for(const auto* lane:{"chain","chainRight"})if(auto* rows=state[lane].getArray())for(const auto& candidate:*rows)
+        if(candidate["blockId"].toString()==id&&candidate["kind"].toString()!="insert")row=candidate;
+    if(!row.isObject())return false;
+    const auto params=row["params"];
+    if(!params.isObject())return false;
+    if(first){blockEditId=id;blockEditKind=kind;}else if(blockEditId!=id||blockEditKind!=kind)return false;
+    bool applied=false;
+    if(kind=="param") {
+        if(!exact(*obj,{"phase","blockId","kind","param","value"})||!argument["param"].isString()||!number(argument["value"]))return false;
+        const auto param=argument["param"].toString();const double value=(double)argument["value"];
+        if(param!="enabled"&&param!="normalize"&&param!="inputGain"&&param!="outputGain"&&param!="mix")return false;
+        if(!unit(value)||((param=="enabled"||param=="normalize")&&value!=0&&value!=1))return false;
+        if(first){blockEditParam=param;
+            blockEditBaseline=param=="enabled"?params["enabled"]:param=="normalize"?params["normalize"]:
+                param=="inputGain"?params["inputGain"]:param=="outputGain"?params["outputGain"]:params["mix"];
+            if((param=="enabled"||param=="normalize")?!blockEditBaseline.isBool():
+               (!number(blockEditBaseline)||!unit((double)blockEditBaseline)))return false;
+        }
+        else if(blockEditParam!=param)return false;
+        applied=owner->setBlockParam(id.toStdString(),param,value);
+    } else if(kind=="eqEnabled"||kind=="eqPre") {
+        if(!exact(*obj,{"phase","blockId","kind","value"})||!argument["value"].isBool())return false;
+        const bool value=(bool)argument["value"];
+        if(first){blockEditBaseline=params["eq"][kind=="eqEnabled"?"enabled":"pre"];
+            if(!blockEditBaseline.isBool())return false;
+        }
+        applied=kind=="eqEnabled"?owner->setBlockEqEnabled(id.toStdString(),value):owner->setBlockEqPre(id.toStdString(),value);
+    } else if(kind=="eqBand") {
+        if(!exact(*obj,{"phase","blockId","kind","index","band"})||!number(argument["index"])||!argument["band"].isObject())return false;
+        const int index=(int)argument["index"];auto* band=argument["band"].getDynamicObject();
+        if(index<0||index>=6||(double)argument["index"]!=index||!band||!exact(*band,{"type","freqHz","gainDb","q"})
+           ||!argument["band"]["type"].isString()||!number(argument["band"]["freqHz"])||!number(argument["band"]["gainDb"])||!number(argument["band"]["q"]))return false;
+        const auto type=argument["band"]["type"].toString();const double frequency=(double)argument["band"]["freqHz"];
+        const double gain=(double)argument["band"]["gainDb"],q=(double)argument["band"]["q"];
+        const bool role=index==0?(type=="lowcut"||type=="lowshelf"):index==5?(type=="highshelf"||type=="highcut"):type=="bell";
+        if(!role||!std::isfinite(frequency)||frequency<20||frequency>20000||!std::isfinite(gain)||gain< -15||gain>15||!std::isfinite(q)||q<.1||q>10)return false;
+        if(first){blockEditBand=index;blockEditBaseline=params["eq"]["bands"][index];if(!blockEditBaseline.isObject())return false;}
+        else if(blockEditBand!=index)return false;
+        applied=owner->setBlockEqBand(id.toStdString(),index,argument["band"]);
+    } else return false;
+    if(!applied)return false;
+    deadlineMs=juce::Time::getMillisecondCounterHiRes()+30000;
+    if(phase=="commit")blockEditCommitted=true;
+    return true;
+}
+
+void Tone3000StageSession::restoreBlockEdit() {
+    if(!owner||blockEditId.isEmpty()||blockEditBaseline.isVoid())return;
+    if(blockEditKind=="param") {
+        if((blockEditParam=="enabled"||blockEditParam=="normalize")&&blockEditBaseline.isBool())
+            owner->setBlockParam(blockEditId.toStdString(),blockEditParam,(bool)blockEditBaseline?1.0:0.0);
+        else if(number(blockEditBaseline)&&unit((double)blockEditBaseline))
+            owner->setBlockParam(blockEditId.toStdString(),blockEditParam,(double)blockEditBaseline);
+    }
+    else if(blockEditKind=="eqEnabled"&&blockEditBaseline.isBool())owner->setBlockEqEnabled(blockEditId.toStdString(),(bool)blockEditBaseline);
+    else if(blockEditKind=="eqPre"&&blockEditBaseline.isBool())owner->setBlockEqPre(blockEditId.toStdString(),(bool)blockEditBaseline);
+    else if(blockEditKind=="eqBand"&&blockEditBaseline.isObject())owner->setBlockEqBand(blockEditId.toStdString(),blockEditBand,blockEditBaseline);
+}
+
 void Tone3000StageSession::begin(uint64_t requested,uint32_t operation,const juce::String& payload) {
     auto retained=shared_from_this();std::lock_guard lock(mutex);
     if(!owner||requested!=token)return;
@@ -129,6 +211,11 @@ void Tone3000StageSession::begin(uint64_t requested,uint32_t operation,const juc
         if(payload.isNotEmpty()) {
             auto parse=juce::JSON::parse(payload,argument);
             if(parse.failed()||!argument.isObject()){finish("failed");return;}
+        }
+        if(operation==TONE3000_STAGE_BLOCK_EDIT) {
+            if(payload.isEmpty()||!applyBlockEdit(argument,blockEditId.isEmpty())){cancelNative();finish("failed");return;}
+            if(blockEditCommitted){finish("done");return;}
+            timerLifetime=retained;startTimer(100);auto value=object();value->setProperty("state","listening");publish(value);return;
         }
         if(operation==TONE3000_STAGE_LINKED_PAN||operation==TONE3000_STAGE_EXCLUSIVE_SOLO) {
             if(!(bool)state["stereoEnabled"]){finish("notApplicable");return;}
@@ -193,6 +280,10 @@ void Tone3000StageSession::timerCallback() {
     if(!owner||!active)return;
     try {
         if(cancelRequested){cancelNative();finish("cancelled");return;}
+        if(command==TONE3000_STAGE_BLOCK_EDIT) {
+            if(juce::Time::getMillisecondCounterHiRes()>deadlineMs){cancelNative();finish("timeout");}
+            return;
+        }
         auto observed=runtime();
         if(parameterRevision.load(std::memory_order_relaxed)!=baselineParameters
             ||(int)observed["revision"]!=chainRevision){cancelNative();finish("cancelled");return;}
@@ -237,7 +328,7 @@ juce::var TONE3000Processor::getStageRuntime() {
     auto state=getChainState(-1);auto output=object();juce::Array<juce::var> blocks;
     output->setProperty("revision",state["revision"]);output->setProperty("stereoEnabled",state["stereoEnabled"]);output->setProperty("audioActive",isAudioActive());
     output->setProperty("stereoInput",state["stereoInput"]);output->setProperty("stereoOutput",state["stereoOutput"]);
-    output->setProperty("capabilities",juce::Array<juce::var>{"autoBalance","autoAlign","outputMeasure","linkedPan","exclusiveSolo"});
+    output->setProperty("capabilities",juce::Array<juce::var>{"autoBalance","autoAlign","outputMeasure","linkedPan","exclusiveSolo","blockLiveEdit"});
     bool truncated=false;
     for(const auto* name:{"chain","chainRight"})if(auto* lane=state[name].getArray())for(const auto& row:*lane) {
         if(row["kind"].toString()=="insert")continue;

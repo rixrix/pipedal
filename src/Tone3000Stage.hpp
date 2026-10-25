@@ -12,10 +12,15 @@ struct Tone3000StageRequest {
     int64_t instanceId_=-1, token_=0;
     std::string expectedRevision_, command_, payload_;
 };
+struct Tone3000StageUpdateRequest {
+    int64_t instanceId_=-1, token_=0;
+    std::string payload_;
+};
 struct Tone3000LevelRequest { uint64_t token=0; std::string revision; double target=0; };
 class Tone3000Stage {
 public:
     static Tone3000StageRequest Request(const json_variant& value, bool poll);
+    static Tone3000StageUpdateRequest UpdateRequest(const json_variant& value);
     static uint32_t Command(const std::string& command);
     static json_variant Result(const std::string& text);
     static bool Terminal(const json_variant& result);
