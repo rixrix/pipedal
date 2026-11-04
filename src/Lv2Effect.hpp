@@ -231,6 +231,9 @@ namespace pipedal
 
         virtual bool IsLv2Effect() const { return true; }
         virtual bool GetLv2State(Lv2PluginState*state) override;
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5] */
+        int32_t SubmitTone3000Stage(uint64_t token, uint32_t command, const std::string& payload);
+        int32_t ReadTone3000Stage(uint64_t token, std::string& result);
         virtual void SetLv2State(Lv2PluginState&state) override;
 
         virtual void RequestPatchProperty(LV2_URID uridUri) ;

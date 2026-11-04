@@ -1,0 +1,15 @@
+T3K Pitch LV2 adapter: Copyright (c) 2026 PiPedal contributors, MIT.
+The adapter is experimental until actual host/audio qualification completes.
+
+Unmodified PitchShift.h and PitchShift.cpp:
+TONE3000 v0.0.12, commit ab5e5ae; Copyright (c) 2026 TONE3000, MIT.
+See TONE3000-LICENSE. Upstream source:
+https://github.com/tone-3000/tone3000-plugin/tree/ab5e5ae
+PitchShift.h SHA256: 6dfbd00a6c74b0020ba72e6a5f58c0b98d2c98f4c7975a7fcb9d1be6c36d0c30
+PitchShift.cpp SHA256: 069b6c62b96063c04d8fa574c7c8e5e249801acc65fb5e600eefe96194f63e3a
+
+JUCE 9.0.3 is a separate dependency, not covered by TONE3000's MIT licence.
+See JUCE-LICENSE.md and module licence headers in the dependency checkout.
+This open source bundle declares the AGPLv3 distribution path for linked
+JUCE code; commercial JUCE terms are an alternative, not inferred here.
+No JUCE dependency is downloaded by this build.

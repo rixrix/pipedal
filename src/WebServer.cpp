@@ -76,8 +76,8 @@ public:
     typedef request_with_file_upload type;
     typedef std::shared_ptr<type> ptr;
 
-    request_with_file_upload()
-        : m_buf(std::make_shared<std::string>()), m_ready(false) {    
+    explicit request_with_file_upload(std::filesystem::path temporaryDirectory = WEB_TEMP_DIR)
+        : m_buf(std::make_shared<std::string>()), m_ready(false), m_temporaryDirectory(std::move(temporaryDirectory)) {
 }
 
     size_t consume(char const* buf, size_t len, std::error_code& ec);
@@ -142,6 +142,7 @@ public:
      */
 
     bool prepare_body(std::error_code& ec);
+    bool finish_body(std::error_code& ec);
 
     std::error_code process(std::string::iterator begin, std::string::iterator end);
     size_t process_body(char const* buf, size_t len,
@@ -158,6 +159,7 @@ public:
     std::ifstream m_inputStream;
     std::stringstream m_stringInputStream;
     bool m_outputOpen = false;
+    std::filesystem::path m_temporaryDirectory;
 };
 const std::filesystem::path& request_with_file_upload::get_body_input_file()
 {
@@ -216,7 +218,7 @@ bool request_with_file_upload::prepare_body(std::error_code& ec)
         m_uploading_to_file = true;
         try
         {
-            this->m_temporaryFile = std::make_shared<TemporaryFile>(WEB_TEMP_DIR);
+            this->m_temporaryFile = std::make_shared<TemporaryFile>(m_temporaryDirectory);
             m_outputStream.open(this->m_temporaryFile->Path(), std::ios_base::trunc | std::ios_base::out | std::ios_base::binary);
             if (!m_outputStream)
             {
@@ -229,6 +231,24 @@ bool request_with_file_upload::prepare_body(std::error_code& ec)
             ec = error::make_error_code(error::istream_bad);
         }
     }
+    return true;
+}
+
+/** A ready upload must expose all bytes to the consuming HTTP handler.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [DES-SEC] [7.37]
+ */
+bool request_with_file_upload::finish_body(std::error_code& ec)
+{
+    if (m_uploading_to_file)
+    {
+        m_outputStream.close(); // Flush before opening an independent reader.
+        if (!m_outputStream)
+        {
+            ec = websocketpp::http::error::make_error_code(websocketpp::http::error::istream_bad);
+            return false;
+        }
+    }
+    m_ready = true;
     return true;
 }
 
@@ -248,6 +268,11 @@ inline size_t request_with_file_upload::process_body(char const* buf, size_t len
         try
         {
             m_outputStream.write(buf, processed);
+            if (!m_outputStream)
+            {
+                ec = error::make_error_code(error::istream_bad);
+                return 0;
+            }
         }
         catch (const std::exception& e)
         {
@@ -298,8 +323,7 @@ inline size_t request_with_file_upload::consume(char const* buf, size_t len, std
         // if we have ready all the expected body bytes set the ready flag
         if (body_ready())
         {
-            m_outputStream.close();
-            m_ready = true;
+            finish_body(ec);
         }
         return bytes_processed;
     }
@@ -406,7 +430,7 @@ inline size_t request_with_file_upload::consume(char const* buf, size_t len, std
                 }
                 if (body_ready())
                 {
-                    m_ready = true;
+                    if (!finish_body(ec)) return bytes_processed;
                 }
                 ec = std::error_code();
                 return bytes_processed;
@@ -444,6 +468,29 @@ inline size_t request_with_file_upload::consume(char const* buf, size_t len, std
         // delimiter found.
         begin = end + (sizeof(header_delimiter) - 1);
     }
+}
+
+/** Exercise the actual private request parser, keeping temporary bytes local.
+ * This internal test entry point is not exposed through HTTP or WebSocket.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [DES-SEC] [7.37]
+ */
+namespace pipedal::detail {
+std::vector<std::pair<size_t, bool>> ConsumeFileUploadForTest(
+    const std::filesystem::path& temporaryDirectory, const std::vector<std::string>& chunks,
+    std::error_code& error,
+    const std::function<void(const std::filesystem::path&, std::istream&)>& inspect)
+{
+    request_with_file_upload request(temporaryDirectory);
+    std::vector<std::pair<size_t, bool>> progress;
+    for (const auto& chunk : chunks)
+    {
+        const auto count = request.consume(chunk.data(), chunk.size(), error);
+        progress.emplace_back(count, request.ready());
+        if (error) break;
+    }
+    if (request.ready()) inspect(request.get_body_input_file(), request.get_body_input_stream());
+    return progress;
+}
 }
 
 inline std::string request_with_file_upload::raw() const
@@ -669,15 +716,14 @@ static bool encoding_allowed(const std::string& acceptEncodingHeader, const std:
 static bool can_use_gzip_encoding(
     const std::string& acceptEncodingHeader,
     const std::filesystem::path& filename,
-    std::filesystem::path* gzName)
+    std::filesystem::path* gzName,
+    std::error_code& error)
 {
+    error.clear();
     if (!encoding_allowed(acceptEncodingHeader, "gzip"))
         return false;
     *gzName = filename.string() + ".gz";
-    if (std::filesystem::exists(*gzName)) {
-        return true;
-    }
-    return false;
+    return std::filesystem::exists(*gzName,error);
 }
 
 
@@ -1099,7 +1145,7 @@ namespace pipedal
                                 ServerError(*con, ec.message());
                                 return;
                             }
-                            con->set_status(websocketpp::http::status_code::ok);
+                            con->set_status(static_cast<websocketpp::http::status_code::value>(res.status()));
                             return;
                         }
                         else if (req.method() == HttpVerb::get)
@@ -1122,7 +1168,7 @@ namespace pipedal
                                 ServerError(*con, ec.message());
                                 return;
                             }
-                            con->set_status(websocketpp::http::status_code::ok);
+                            con->set_status(static_cast<websocketpp::http::status_code::value>(res.status()));
                             return;
                         }
                         else if (req.method() == HttpVerb::post)
@@ -1145,7 +1191,7 @@ namespace pipedal
                                 ServerError(*con, ec.message());
                                 return;
                             }
-                            con->set_status(websocketpp::http::status_code::ok);
+                            con->set_status(static_cast<websocketpp::http::status_code::value>(res.status()));
 
                             return;
                         }
@@ -1183,15 +1229,27 @@ namespace pipedal
 
             size_t contentLength = 0;
 
-            if (can_use_gzip_encoding(req.get(HttpField::accept_encoding), filename, &gzName))
+            // Upstream d104a8d87de4 turns failed static-file metadata into 404.
+            // Include gzip selection/metadata: either file can disappear while
+            // frontend assets are published, without unwinding the web thread.
+            // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+            std::error_code fileError;
+            bool useGzip = can_use_gzip_encoding(req.get(HttpField::accept_encoding), filename, &gzName,fileError);
+            if (fileError)
+            {
+                NotFound(*con, requestUri.str());
+                return;
+            }
+            if (useGzip)
             {
                 filename = gzName;
-                contentLength = std::filesystem::file_size(filename);
-                res.set(HttpField::content_encoding, "gzip");
-            } else {
-                contentLength = std::filesystem::file_size(filename);                
             }
-
+            contentLength = std::filesystem::file_size(filename,fileError);
+            if (fileError)
+            {
+                NotFound(*con, requestUri.str());
+                return;
+            }
             if (req.method() != HttpVerb::get)
             {
                 ServerError(*con, "Unknown HTTP-Method");
@@ -1203,6 +1261,10 @@ namespace pipedal
             {
                 NotFound(*con, requestUri.str());
                 return;
+            }
+            if (useGzip)
+            {
+                res.set(HttpField::content_encoding, "gzip");
             }
 
             response.reserve(contentLength);

@@ -92,6 +92,8 @@ include(FindPkgConfig)
 
 
 find_package(OpenSSL REQUIRED)
+# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
+find_package(LibXml2 REQUIRED)
 
 find_package(ICU REQUIRED COMPONENTS uc i18n)
 message(STATUS "ICU_LIBRARIES: ${ICU_LIBRARIES}")
@@ -251,6 +253,16 @@ else()
 endif()
 
 set (PIPEDAL_SOURCES
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.8] [3.9]
+    Tone3000Preset.hpp Tone3000Preset.cpp
+    Tone3000Library.hpp Tone3000Library.cpp
+    Tone3000Defaults.hpp Tone3000Defaults.cpp
+    Tone3000Operations.hpp Tone3000Operations.cpp
+    Tone3000Performance.hpp Tone3000Performance.cpp
+    Tone3000MixMatch.hpp Tone3000MixMatch.cpp
+    AudioRecoveryPolicy.hpp
+    Tone3000Stage.hpp Tone3000Stage.cpp
+    Tone3000BundleCheck.hpp Tone3000BundleCheck.cpp
     Tone3000Tone.hpp Tone3000Tone.cpp
     AesDigest.cpp AesDigest.hpp
     ChannelRouterSettings.cpp ChannelRouterSettings.hpp
@@ -404,6 +416,10 @@ set(PIPEDAL_LIBS libpipedald zip
 
 add_library(libpipedald STATIC ${PIPEDAL_SOURCES})
 
+# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-EXPORT] [7.11]
+add_executable(tone3000presettool EXCLUDE_FROM_ALL Tone3000PresetTool.cpp)
+target_link_libraries(tone3000presettool PRIVATE libpipedald ${PIPEDAL_LIBS})
+
 target_compile_definitions(libpipedald PUBLIC "_REENTRANT")
 
 target_include_directories(libpipedald PUBLIC ${PIPEDAL_INCLUDES})
@@ -414,6 +430,7 @@ target_link_libraries(libpipedald
    PRIVATE
    SQLiteCpp
     OpenSSL::Crypto
+   LibXml2::LibXml2
    ${PipeWire_LIBRARIES}
    )
 
@@ -493,6 +510,17 @@ add_executable(pipedaltest
     LocaleTest.cpp
 
     Lv2HostLeakTest.cpp
+    PedalboardStateTest.cpp
+    Tone3000HostTest.cpp
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.8] [3.9]
+    Tone3000PresetTest.cpp
+    Tone3000LibraryTest.cpp
+    Tone3000DefaultsTest.cpp
+    Tone3000PerformanceTest.cpp
+    Tone3000MixMatchTest.cpp
+    AudioRecoveryPolicyTest.cpp
+    Tone3000StageTest.cpp
+    Tone3000BundleCheckTest.cpp
 
 
     SystemConfigFile.hpp SystemConfigFile.cpp
@@ -501,6 +529,15 @@ add_executable(pipedaltest
     MemDebug.cpp
     MemDebug.hpp
     )
+# Finite-output assertions in the diagnostic must survive the release target's
+# -ffast-math. This changes only the probe, not production DSP compilation.
+set_property(SOURCE Tone3000HostTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
+# Uploaded preset validation must reject nonfinite numbers in release builds.
+# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [DES-STAGE] [3.8] [7.1]
+set_property(SOURCE Tone3000Preset.cpp Tone3000PresetTest.cpp Tone3000Library.cpp Tone3000LibraryTest.cpp Tone3000Defaults.cpp Tone3000DefaultsTest.cpp Tone3000Operations.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
+set_property(SOURCE Tone3000Performance.cpp Tone3000PerformanceTest.cpp AudioRecoveryPolicyTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
+set_property(SOURCE Tone3000Stage.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
+set_property(SOURCE Tone3000StageTest.cpp Tone3000BundleCheck.cpp Tone3000BundleCheckTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)
 target_link_libraries(pipedaltest PRIVATE ${PIPEDAL_LIBS} ${ICU_LIBRARIES})
 target_include_directories(pipedaltest PRIVATE ${PIPEDAL_INCLUDES})
 
@@ -946,3 +983,5 @@ install (TARGETS pipedald pipedaladmind pipedal_update DESTINATION ${CMAKE_INSTA
 
    
 
+# @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-PITCH-LV2] [7.34]
+set_property(SOURCE Tone3000MixMatch.cpp Tone3000MixMatchTest.cpp APPEND PROPERTY COMPILE_OPTIONS -fno-fast-math)

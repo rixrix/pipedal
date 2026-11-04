@@ -1,3 +1,4 @@
+import type { Tone3000DerivedSource } from "./Tone3000MixMatch";
 // Copyright (c) Robin E.R. Davies
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of
@@ -87,6 +88,12 @@ export class PedalboardItem implements Deserializable<PedalboardItem> {
         this.stateUpdateCount = input.stateUpdateCount;
         this.lv2State = input.lv2State;
         this.lilvPresetUri = input.lilvPresetUri;
+        // Retain import identity through ordinary browser board edits/clones.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.10]
+        this.tone3000SourceKey = input.tone3000SourceKey ?? "";
+        this.tone3000SourceHash = input.tone3000SourceHash ?? "";
+        this.tone3000FollowDefaults = input.tone3000FollowDefaults ?? false;
+        this.tone3000DerivedSource = input.tone3000DerivedSource ? { ...input.tone3000DerivedSource } : null;
         this.pathProperties = input.pathProperties;
         this.useModUi = input.useModUi ?? false;
         this.iconColor = input.iconColor??"";
@@ -241,6 +248,12 @@ export class PedalboardItem implements Deserializable<PedalboardItem> {
     stateUpdateCount: number = 0;
     lv2State: [boolean,any] = [false,{}];
     lilvPresetUri: string = "";
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.10] */
+    tone3000SourceKey: string = "";
+    tone3000SourceHash: string = "";
+    /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
+    tone3000FollowDefaults: boolean = false;
+    tone3000DerivedSource: Tone3000DerivedSource | null = null;
     pathProperties: {[Name: string]: string} = {};
     useModUi: boolean = false; // true if this item should use the mod-ui.
     iconColor: string = "";
@@ -887,5 +900,4 @@ function* itemGeneratorSplitAfter_(items: PedalboardItem[]): Generator<Pedalboar
         yield item;
     }
 }
-
 

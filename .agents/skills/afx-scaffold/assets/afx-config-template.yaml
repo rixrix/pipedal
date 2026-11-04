@@ -1,0 +1,45 @@
+# AFX Project Configuration
+# Created by /afx-scaffold init. Customize freely — AFX never overwrites this file.
+# Full reference: https://github.com/AgenticFlowX/afx/blob/main/.afx.yaml.template
+
+# AFX version — controls which branch/tag afx-cli and pack index are fetched from.
+# Accepts: semver (e.g. '1.5.3' → tag v1.5.3), branch name, or 'main'.
+# Plugin installs manage skill versions through the Claude Code marketplace instead.
+version: 'main'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────────────────────
+paths:
+  specs: 'docs/specs'                    # Root directory for all specs
+  adr: 'docs/adr'                        # Global architecture decision records
+
+# Active features (used by /afx-report, /afx-next)
+# Add your feature folder names here. Use /afx-scaffold spec to scaffold a new feature.
+features: []
+  # - my-feature                         # Example: uncomment and rename
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Library (Upstream Artifacts) - Optional
+# ─────────────────────────────────────────────────────────────────────────────
+library:
+  docs: 'docs/agenticflowx'             # AFX framework documentation
+  research: 'docs/research'             # Global exploration & knowledge
+  architecture: 'docs/architecture'    # System constraints & patterns
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature Prefixes (for discussion IDs)
+# ─────────────────────────────────────────────────────────────────────────────
+# Used by /afx-session for discussion IDs.
+# Format: feature-folder: PREFIX (2-3 letters, uppercase)
+prefixes:
+  specs: GEN                             # General cross-cutting discussions
+  # my-feature: MF                       # Example: add prefix per feature
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Packs & Skills — Managed by afx-cli, do not edit manually
+# ─────────────────────────────────────────────────────────────────────────────
+# Left empty for plugin installs; afx-cli populates these if you later install
+# skills through the CLI. Harmless to keep either way.
+packs: []
+skills: []

@@ -1301,6 +1301,26 @@ namespace pipedal
             );
             return result;
         }
+        /** Copy live handle identity under the existing open/close/restart lock.
+         * No requested-device inference and no new normal processing-path lock.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.2]
+         */
+        AudioDriverRuntimeInfo GetRuntimeInfo() override
+        {
+            std::unique_lock lock{restartMutex,std::try_to_lock};
+            AudioDriverRuntimeInfo result;
+            // Lifecycle operations can wait on a device. Status must return
+            // unknown promptly instead of joining that wait or the RT path.
+            if (!lock.owns_lock()) return result;
+            if (!open || !captureHandle || !playbackHandle) return result;
+            result.driver = "ALSA";
+            if (const char* name = snd_pcm_name(captureHandle)) result.inputDevice = name;
+            if (const char* name = snd_pcm_name(playbackHandle)) result.outputDevice = name;
+            // This is the mode used by this opened driver's processing loop.
+            result.usingFallback = isDummyDriver;
+            if (sampleRate != 0) result.sampleRate = sampleRate;
+            return result;
+        }
         void PreparePlaybackFunctions(snd_pcm_format_t playbackFormat)
         {
             copyOutputFn = nullptr;

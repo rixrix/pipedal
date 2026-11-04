@@ -45,6 +45,11 @@
 #include "Tone3000Downloader.hpp"
 #include "Uri.hpp"
 #include "Tone3000Tone.hpp"
+#include "Tone3000Operations.hpp"
+#include "AudioRecoveryPolicy.hpp"
+#include "Tone3000Performance.hpp"
+#include "Tone3000MixMatch.hpp"
+#include "Tone3000Stage.hpp"
 
 namespace pipedal
 {
@@ -134,6 +139,16 @@ namespace pipedal
         clock::time_point lastRestartTime = clock::time_point::min();
         int audioRestartRetries = 0;
         PostHandle audioRetryPostHandle = 0;
+        // Lifecycle lock precedes model mutex; joins never hold model mutex.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-USB] [7.9]
+        std::recursive_mutex audioLifecycleMutex;
+        AudioRecoveryPolicy configuredAudioRecovery;
+        PostHandle configuredAudioRecoveryPostHandle = 0;
+        bool configuredAudioRecoveryRunning = false;
+        void CancelConfiguredAudioRecovery();
+        void ArmConfiguredAudioRecovery();
+        void ScheduleConfiguredAudioRecovery();
+        void RetryConfiguredAudio(uint64_t generation);
 
         bool hasWifi = false;
 
@@ -164,6 +179,7 @@ namespace pipedal
         public:
             int64_t clientId;
             int64_t clientHandle;
+            bool programOnly=false;
         };
         class AtomOutputListener
         {
@@ -180,6 +196,7 @@ namespace pipedal
             LV2_URID propertyUrid;
         };
         void DeleteMidiListeners(int64_t clientId);
+        void UpdateMidiListenFlags();
         void DeleteAtomOutputListeners(int64_t clientId);
 
         std::vector<MidiListener> midiEventListeners;
@@ -250,6 +267,24 @@ namespace pipedal
         IPiPedalModelSubscriber *GetNotificationSubscriber(int64_t clientId);
         std::atomic<bool> closed = false;
         bool SyncLv2State();
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
+        std::map<int64_t,Tone3000StateSummary> pendingTone3000States;
+        void ApplyTone3000FollowDefaults(Pedalboard& board);
+        void RegisterTone3000Intents();
+        void GuardTone3000PendingStates(bool requireCapture = true);
+        PedalboardItem& CaptureTone3000Item(int64_t instanceId);
+        struct Tone3000StageJob {
+            int64_t clientId=-1, bankId=-1, presetId=-1, instanceId=-1;
+            uint64_t token=0; uint32_t command=0;
+            bool captured=false; json_variant result;
+            std::string savedRevision;
+            uint64_t postHandle=0;
+        };
+        uint64_t nextTone3000StageToken=0;
+        std::map<int64_t,Tone3000StageJob> tone3000StageJobs;
+        std::map<uint64_t,Tone3000StageJob> tone3000LevelMeasurements;
+        void CancelTone3000StageJobs(int64_t clientId=-1, bool retainCurrentState=true);
+        void ScheduleTone3000StagePoll(int64_t instanceId,uint64_t token);
 
     private: // IAudioHostCallbacks
         virtual void OnNotifyLv2StateChanged(uint64_t instanceId) override;
@@ -375,15 +410,47 @@ namespace pipedal
         const PluginHost &GetPluginHost() const { return pluginHost; }
         PluginHost &GetPluginHost() { return pluginHost; }
 
+        /** Ordinary observation remains available for recovery while a plugin is restoring.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-RECOVERY] [3.16]
+         */
         Pedalboard GetCurrentPedalboardCopy()
         {
             std::lock_guard<std::recursive_mutex> guard(mutex);
+            GuardTone3000PendingStates(false);
             return pedalboard; // can return a referece because we'd lose  mutex protection
         }
         PluginUiPresets GetPluginUiPresets(const std::string &pluginUri);
         PluginPresets GetPluginPresets(const std::string &pluginUri);
 
         void LoadPluginPreset(int64_t pluginInstanceId, uint64_t presetInstanceId);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+        Tone3000LibraryResult GetTone3000Library();
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4] */
+        Tone3000PerformanceSources GetTone3000PerformanceSources();
+        Tone3000PerformanceResult GetTone3000PerformanceBank(int64_t bankId);
+        Tone3000PerformanceResult CreateTone3000PerformanceBank(int64_t clientId,const Tone3000PerformanceRequest& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-MIX-MATCH] [DES-PITCH-LV2] [7.34] */
+        Tone3000MixMatchPreview GetTone3000MixMatchPreview(const Tone3000MixMatchRequest& request);
+        Tone3000MixMatchResult CreateTone3000MixMatch(int64_t clientId,const Tone3000MixMatchRequest& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-17] [DES-STAGE] [7.1] */
+        Tone3000PreviewResult GetTone3000PresetPreview(const Tone3000PreviewRequest& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
+        Tone3000DefaultsResult GetTone3000Defaults();
+        Tone3000DefaultsResult SetTone3000Defaults(const Tone3000DefaultsRequest& request);
+        Tone3000CurrentStateResult GetTone3000CurrentState(const Tone3000CurrentStateRequest& request);
+        bool SetTone3000CurrentState(int64_t clientId,const Tone3000CurrentStateEdit& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5] */
+        json_variant StartTone3000Stage(int64_t clientId,const Tone3000StageRequest& request);
+        json_variant UpdateTone3000Stage(int64_t clientId,const Tone3000StageUpdateRequest& request);
+        json_variant PollTone3000Stage(int64_t clientId,const Tone3000StageRequest& request,bool cancel=false);
+        json_variant ApplyTone3000Level(int64_t clientId,uint64_t token,const std::string& expectedRevision,double targetRmsDb);
+        std::vector<uint8_t> ExportTone3000Preset(int64_t bankId,int64_t presetId,int64_t instanceId);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+        Tone3000ImportResult ImportTone3000Preset(int64_t clientId, const Tone3000ImportRequest& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+        void LoadTone3000Preset(int64_t clientId, const Tone3000LoadRequest& request);
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9] */
+        Tone3000LibraryEntry UploadTone3000Preset(const std::string& filename, const std::filesystem::path& temporary);
 
         void AddNotificationSubscription(std::shared_ptr<IPiPedalModelSubscriber> pSubscriber);
         void RemoveNotificationSubsription(std::shared_ptr<IPiPedalModelSubscriber> pSubscriber);
@@ -402,7 +469,7 @@ namespace pipedal
         Pedalboard &GetPedalboard();
         std::shared_ptr<Lv2Pedalboard> GetLv2Pedalboard();
 
-        void UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalboard);
+        void UpdateCurrentPedalboard(int64_t clientId, Pedalboard &pedalboard, const std::vector<int64_t>& forceReloadIds = {});
 
         void SetSnapshots(std::vector<std::shared_ptr<Snapshot>> &snapshots, int64_t selectedSnapshot);
         void SetSnapshot(int64_t selectedSnapshot);
@@ -491,6 +558,7 @@ namespace pipedal
         void SetJackServerSettings(const JackServerSettings &jackServerSettings);
 
         void ListenForMidiEvent(int64_t clientId, int64_t clientHandle);
+        void ListenForMidiProgramEvent(int64_t clientId, int64_t clientHandle);
         void CancelListenForMidiEvent(int64_t clientId, int64_t clientHandle);
 
         void MonitorPatchProperty(int64_t clientId, int64_t clientHandle, uint64_t instanceId, const std::string &propertyUri);

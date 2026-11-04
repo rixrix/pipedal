@@ -934,6 +934,7 @@ namespace pipedal
         std::string vst3CachePath;
 
         std::vector<const LV2_Feature *> lv2Features;
+        LV2_Feature boundedBlockLengthFeature;
         MapFeature mapFeature;
         FileMetadataFeature fileMetadataFeature;
         std::string pluginStoragePath;
@@ -1044,7 +1045,7 @@ namespace pipedal
 
         virtual Lv2Pedalboard *CreateLv2Pedalboard(Pedalboard &pedalboard, Lv2PedalboardErrorList &errorList);
 
-        virtual Lv2Pedalboard *UpdateLv2PedalboardStructure(Pedalboard &pedalboard, Lv2Pedalboard *existingPedalboard, Lv2PedalboardErrorList &errorList);
+        virtual Lv2Pedalboard *UpdateLv2PedalboardStructure(Pedalboard &pedalboard, Lv2Pedalboard *existingPedalboard, Lv2PedalboardErrorList &errorList, const std::vector<int64_t>& forceReloadIds = {});
 
         void setSampleRate(double sampleRate)
         {

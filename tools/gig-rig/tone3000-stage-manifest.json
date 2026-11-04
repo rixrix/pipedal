@@ -1,0 +1,33 @@
+{
+  "tone3000/plugin/include/Processor.h": {
+    "before": "f394ff0050f2c9423d89363871f47cb811cd63df546dbd059063600811edd43e",
+    "after": "4e066c42d6112c096836768c78f9adac881a34f1a1a1aecf882067d3c61a4939"
+  },
+  "tone3000/plugin/src/Processor.cpp": {
+    "before": "83e4d870ab68c4a766f470823318d80df05be86b52501a24145c4758f02d94fe",
+    "after": "08bf920fa94a75514b0a5325df5a0ba4751b951a5c241f240dcb62c25a6f152e"
+  },
+  "tone3000/plugin/include/NamEngine.h": {
+    "before": "05e1e9b16c228c74e1a4c79ceae2de8199a505b17fac8cc6217b3a5bbfdd4eb6",
+    "after": "5f9ddd2230477bc5947369b19ad3a2150b016e7f8075d39be7754d8f64e4b4f4"
+  },
+  "tone3000/plugin/CMakeLists.txt": {
+    "before": "ad0c04f7b98c7d2379a841cabe34b563328752e3ffa8bdf8c043b3c2876950d1",
+    "after": "a51fce82d6970a9bf3ad388a4a0b71c63beae064ca0aa136b29f51bfdd99a233"
+  },
+  "juce/modules/juce_audio_plugin_client/juce_audio_plugin_client_LV2.cpp": {
+    "before": "c569c8184c496e5cc4378ffbf237e29162de54e15a6da32ebea2f6cbb0bc45ed",
+    "after": "1f3483cd9564fab4839fd87b39f6a0984756641af04349c70715fc0471fc006f"
+  },
+  "artifacts": {
+    "Tone3000StageBridge.hpp": "6246377456ce7c95f030610176b661c4223c1325f16f49b719f84ee36d1a88b1",
+    "stage-addon/Tone3000StageSession.h": "8bbec8db24d7c9e1236a6a70bfff382e03150bdcaee2d6ec4e85a6d0cab1a73d",
+    "stage-addon/Tone3000StageSession.cpp": "61ece88f05cae3b2505b9cca1087ee5b82d0808d62d5c1be662fac5858313d77",
+    "tone3000-stage.patch": "0189d24c3fcea9222372e1b8a2438b04b16c43832b9d501822f31e1e08fe6f18",
+    "stage-addon/Tone3000StageMeter.hpp": "7c99068e70199ec3200ccb2b93c89d19cb5f7dc2a5bac70a60d40cc18e27696c"
+  },
+  "tone3000/test/CMakeLists.txt": {
+    "before": "d3afe2e779a578ff3707ef568171e530e1ef26209b92a4cd99f1b8f8c5279042",
+    "after": "2583e8fea0a6661667e12482f395885cb0d6eb935c2757031b5e7d062b4fd09c"
+  }
+}

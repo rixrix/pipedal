@@ -38,6 +38,7 @@
 #include "MimeTypes.hpp"
 #include "AudioFileMetadataReader.hpp"
 #include "AudioFiles.hpp"
+#include "Tone3000BundleCheck.hpp"
 #include "util.hpp"
 #include "HtmlHelper.hpp"
 #include "WebServerMod.hpp"
@@ -309,6 +310,10 @@ public:
         }
         std::string segment = request_uri.segment(1);
 
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9]
+        if (segment == "uploadTone3000Preset") return method == HttpVerb::post;
+        if (segment == "exportTone3000Preset") return method == HttpVerb::get;
+
         if (segment == "t3k_uploadAsset")
         {
             return true;
@@ -339,6 +344,7 @@ public:
         {
             return true;
         }
+        if(segment=="checkRigBundle")return true;
         if (segment == "downloadPreset")
         {
             std::string strInstanceId = request_uri.query("id");
@@ -483,6 +489,26 @@ public:
             if (segment == "t3k_uploadAsset")
             {
                 res.set(HttpField::content_length, "0");
+                return;
+            }
+            if (segment == "exportTone3000Preset")
+            {
+                auto identity=[&](const char* key) {
+                    const auto text=request_uri.query(key);
+                    if(text.empty() || text.size()>16 || text.find_first_not_of("0123456789")!=std::string::npos)
+                        throw PiPedalArgumentException("Invalid saved rig identity.");
+                    const auto value=std::stoll(text);
+                    if(value>9007199254740991LL)throw PiPedalArgumentException("Invalid saved rig identity.");
+                    return value;
+                };
+                const auto bank=identity("bankId"),preset=identity("presetId"),instance=identity("instanceId");
+                const auto bytes=model->ExportTone3000Preset(bank,preset,instance);
+                const std::string name="pipedal-"+std::to_string(bank)+"-"+std::to_string(preset)+"-"+std::to_string(instance);
+                res.set(HttpField::content_type,"application/octet-stream");
+                res.set(HttpField::cache_control,"no-store");
+                res.set(HttpField::content_disposition,GetContentDispositionHeader(name,".t3kpreset"));
+                res.setContentLength(bytes.size());
+                res.setBody(std::string(reinterpret_cast<const char*>(bytes.data()),bytes.size()));
                 return;
             }
             if (segment == "t3k_response.html")
@@ -1113,7 +1139,45 @@ public:
         {
             std::string segment = request_uri.segment(1);
 
-            if (segment == "t3k_uploadAsset")
+            // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BUNDLE] [DES-SEC] [7.7]
+            if(segment=="checkRigBundle"){
+                std::stringstream response;json_writer writer(response);
+                try{
+                    if(req.content_length()>Tone3000BundleCheck::MAX_FILE)throw PiPedalArgumentException("Rig bundle exceeds the 128 MiB input bound.");
+                    const auto temporary=req.get_body_temporary_file();if(temporary.empty())throw PiPedalArgumentException("Missing rig bundle body.");
+                    const auto report=Tone3000BundleCheck::Check(temporary,[&](const std::string& uri)->std::optional<Tone3000BundlePluginVersion>{
+                        const auto plugin=model->GetPluginInfo(uri);if(!plugin)return {};
+                        return Tone3000BundlePluginVersion{plugin->name(),plugin->minorVersion(),plugin->microVersion()};
+                    });
+                    writer.write(report);
+                }catch(const std::exception& failure){res.setStatus(400);writer.start_object();writer.write_member("error",std::string(failure.what()));writer.end_object();}
+                const auto body=response.str();res.set(HttpField::content_type,"application/json");res.set(HttpField::cache_control,"no-cache");
+                res.setContentLength(body.size());res.setBody(body);return;
+            }
+            // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [DES-SEC] [3.9]
+            if (segment == "uploadTone3000Preset")
+            {
+                std::stringstream response;
+                json_writer writer(response);
+                try {
+                    if (req.content_length()>64*1024*1024)
+                        throw PiPedalArgumentException("Preset upload exceeds the 64 MiB input bound.");
+                    auto filename=request_uri.query("filename");
+                    auto temporary=req.get_body_temporary_file();
+                    if (temporary.empty()) throw PiPedalArgumentException("Missing preset upload body.");
+                    auto entry=model->UploadTone3000Preset(filename,temporary);
+                    writer.write(entry);
+                } catch (const std::exception& error) {
+                    res.setStatus(400);
+                    writer.start_object(); writer.write_member("error",std::string(error.what())); writer.end_object();
+                }
+                auto body=response.str();
+                res.set(HttpField::content_type,"application/json");
+                res.set(HttpField::cache_control,"no-cache");
+                res.setContentLength(body.size()); res.setBody(body);
+                return;
+            }
+            else if (segment == "t3k_uploadAsset")
             {
                 std::string responseText;
                 try

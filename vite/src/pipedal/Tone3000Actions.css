@@ -1,0 +1,104 @@
+/* Copyright (c) 2026 PiPedal contributors; SPDX-License-Identifier: MIT */
+/* Scoped T3K actions. @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md
+   [FR-4] [DES-VISUAL-ALIGN] [DES-PLAIN-TOOLS] [7.16] [7.25] [7.26] */
+.t3k-controls.t3k-controls .MuiButton-root {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.4;
+    text-transform: none;
+    white-space: normal;
+    box-shadow: none;
+}
+.t3k-controls.t3k-controls .MuiButton-root:hover {
+    box-shadow: none;
+}
+.t3k-controls.t3k-controls .MuiButton-root.Mui-focusVisible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+.t3k-controls .t3k-library-filters {
+    display: grid;
+    width: 100%;
+    max-width: 360px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+}
+.t3k-controls .t3k-library-filters .MuiButton-root {
+    padding-inline: 6px;
+}
+
+/* Short T3K views use one vertical scroll owner; stock plugin layouts are untouched.
+   @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [DES-VISIBLE-APPLY] [7.14] [7.26] */
+@media (max-height: 499px) {
+    .t3k-landscape.t3k-landscape {
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+    }
+    .t3k-landscape #pedalboardScroll {
+        max-height: none !important;
+    }
+    .t3k-landscape #mainPageControls {
+        flex: 0 0 auto !important;
+        height: auto !important;
+        overflow: visible;
+    }
+    .t3k-landscape .t3k-plugin-frame,
+    .t3k-landscape .t3k-plugin-scroll,
+    .t3k-landscape .t3k-plugin-grid,
+    .t3k-landscape .t3k-panel.t3k-panel {
+        height: auto;
+        overflow: visible;
+    }
+    .t3k-landscape .t3k-panel-scroll.t3k-panel-scroll {
+        flex: 0 0 auto;
+        overflow: visible;
+    }
+    .t3k-landscape .t3k-tabbar {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+    }
+    .t3k-landscape .t3k-applybar {
+        top: 48px;
+    }
+    .t3k-controls.MuiDialog-root .MuiDialog-paper {
+        margin: 0;
+        width: 100%;
+        max-width: 100%;
+        height: 100%;
+        max-height: 100%;
+        border-radius: 0;
+    }
+    .t3k-controls.MuiDialog-root .MuiDialogTitle-root {
+        padding: 8px 16px;
+    }
+    .t3k-controls.MuiDialog-root .MuiDialogContent-root {
+        padding: 12px 16px;
+        min-height: 0;
+    }
+    .t3k-controls.MuiDialog-root .MuiDialogActions-root {
+        padding: 4px 12px;
+        flex-shrink: 0;
+    }
+}
+
+/* View preference only; mounted controls remain hidden until the owner returns.
+   @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [FR-15] [DES-LANDSCAPE] [7.38] */
+.t3k-chain-only.t3k-chain-only {
+    overflow: hidden;
+}
+.t3k-chain-only #pedalboardScroll {
+    flex: 1 1 auto !important;
+    max-height: none !important;
+    min-height: 0;
+}
+.t3k-chain-only #mainPageControls,
+.t3k-chain-only .t3k-editor-toolbar > div > :not(.t3k-chain-toggle) {
+    display: none !important;
+}
+.t3k-chain-only .t3k-editor-toolbar > div {
+    justify-content: flex-end !important;
+}

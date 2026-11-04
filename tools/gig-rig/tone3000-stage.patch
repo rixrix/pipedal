@@ -1,0 +1,178 @@
+--- a/tone3000/plugin/include/Processor.h
++++ b/tone3000/plugin/include/Processor.h
+@@ -17,6 +17,8 @@
+ #include "NAM/util.h"
+ #include "NAM/wavenet/model.h"
+ #include "ChainBlock.h"
++#include "Tone3000StageBridge.hpp"
++class Tone3000StageSession;
+ #include "ChainDomain.h"
+ #include "ChainHistory.h"
+ #include "AutoOffset.h"
+@@ -32,12 +34,15 @@
+ 
+ class TONE3000Processor;
+ 
+-class TONE3000Processor : public juce::AudioProcessor,
++class TONE3000Processor : public juce::AudioProcessor, public Tone3000StageProcessor,
+                           private juce::AudioProcessorValueTreeState::Listener,
+                           private juce::AsyncUpdater {
+ public:
+   TONE3000Processor();
+   ~TONE3000Processor() override;
++  int32_t submitStageRequest(uint64_t,uint32_t,const char*,uint32_t) override;
++  int32_t readStageResult(uint64_t,char*,uint32_t) override;
++  juce::var getStageRuntime();
+ 
+   void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+   void releaseResources() override;
+@@ -952,6 +957,8 @@
+   // of stepping once per block. Audio thread only.
+   juce::SmoothedValue<float> outputGainSmoother;
+ 
++  std::shared_ptr<Tone3000StageSession> stageSession;
++
+   // Monotonic revision of everything getChainState() reports. Bumped on every
+   // chain mutation (structure, params, load completion, stereo/side changes)
+   // so the UI can cheaply skip resyncs when nothing changed. Mutable + const:
+--- a/tone3000/plugin/src/Processor.cpp
++++ b/tone3000/plugin/src/Processor.cpp
+@@ -1,4 +1,5 @@
+ #include "Processor.h"
++#include "Tone3000StageSession.h"
+ #if !HEADLESS
+ #include "NativeEditor.h"
+ #endif
+@@ -35,6 +36,7 @@
+       // waiter (releaseChainEditFadeWhenLoadsSettle) never serializes the
+       // very loads it is waiting on.
+       loadingThreadPool(3) {
++  stageSession = std::make_shared<Tone3000StageSession>(*this);
+   // Attach the file logger first thing: state restore (and the background
+   // model loads it queues) runs before prepareToPlay, and its diagnostics
+   // used to vanish because the logger didn't exist yet.
+@@ -508,6 +510,8 @@
+ }
+ 
+ TONE3000Processor::~TONE3000Processor() {
++  stageSession->shutdown();
++  stageSession.reset();
+   parameters.removeParameterListener("osEnabled", this);
+   parameters.removeParameterListener("osFactor", this);
+   for (const auto& paramId : presetParameterIds())
+@@ -2064,6 +2068,7 @@
+     outputMeterLevelL.store(peakToDb(peakL));
+     outputMeterLevelR.store(peakToDb(peakR));
+   }
++  stageSession->measure(buffer);
+ }
+ 
+ // ##################
+--- a/tone3000/plugin/include/NamEngine.h
++++ b/tone3000/plugin/include/NamEngine.h
+@@ -139,6 +139,8 @@
+   void setSlimmableSize(double val);
+ 
+   double getSlimmableSize() const noexcept { return requestedSlimmableSize; }
++  bool stageSupportsSlim() const;
++  std::vector<double> stageSlimBreakpoints() const;
+ 
+ private:
+   /** Instance 0: the reference for metadata queries (all instances share
+--- a/tone3000/plugin/CMakeLists.txt
++++ b/tone3000/plugin/CMakeLists.txt
+@@ -315,6 +315,10 @@
+     endif()
+ endif()
+ 
++if(NOT MSVC)
++    set_source_files_properties(src/Tone3000StageSession.cpp PROPERTIES COMPILE_OPTIONS "-fno-fast-math")
++endif()
++
+ target_sources(${PROJECT_NAME}
+     PRIVATE
+         include/BlockEq.h
+@@ -338,6 +342,10 @@
+         src/PresetManager.cpp
+         include/Processor.h
+         src/Processor.cpp
++        src/Tone3000StageSession.cpp
++        include/Tone3000StageSession.h
++        include/Tone3000StageMeter.hpp
++        include/Tone3000StageBridge.hpp
+         include/MidiMapper.h
+         src/MidiMapper.cpp
+         src/ProcessorChain.cpp
+--- a/juce/modules/juce_audio_plugin_client/juce_audio_plugin_client_LV2.cpp
++++ b/juce/modules/juce_audio_plugin_client/juce_audio_plugin_client_LV2.cpp
+@@ -59,6 +59,8 @@
+ #include <juce_audio_processors_headless/format_types/juce_LV2Common.h>
+ 
+ #include <fstream>
++
++#include "Tone3000StageBridge.hpp"
+ 
+ #define JUCE_TURTLE_RECALL_URI "https://lv2-extensions.juce.com/turtle_recall"
+ 
+@@ -593,6 +595,17 @@
+         processor->addListener (this);
+         processor->setPlayHead (&playHead);
+         prepare (sampleRate, (int) maxBlockSize);
++    }
++
++    int32_t stageSubmit(uint64_t token,uint32_t command,const char* request,uint32_t bytes)
++    {
++        auto* bridge=dynamic_cast<Tone3000StageProcessor*>(processor.get());
++        return bridge?bridge->submitStageRequest(token,command,request,bytes):TONE3000_STAGE_UNSUPPORTED;
++    }
++    int32_t stageRead(uint64_t token,char* result,uint32_t capacity)
++    {
++        auto* bridge=dynamic_cast<Tone3000StageProcessor*>(processor.get());
++        return bridge?bridge->readStageResult(token,result,capacity):TONE3000_STAGE_UNSUPPORTED;
+     }
+ 
+     void connect (uint32_t port, void* data)
+@@ -1366,6 +1379,7 @@
+               "\tlv2:optionalFeature\n"
+               "\t\tlv2:hardRTCapable ;\n"
+               "\tlv2:extensionData\n"
++              "\t\t<" TONE3000_STAGE_URI "> ,\n"
+               "\t\tstate:interface ;\n"
+               "\tlv2:requiredFeature\n"
+               "\t\turid:map ,\n"
+@@ -1676,6 +1690,14 @@
+                 }
+             };
+ 
++            static const Tone3000StageBridge stageBridge {TONE3000_STAGE_ABI_VERSION,TONE3000_STAGE_MAX_REQUEST,TONE3000_STAGE_MAX_RESPONSE,
++                [](void* instance,uint64_t token,uint32_t command,const char* request,uint32_t bytes)->int32_t {
++                    return instance?static_cast<LV2PluginInstance*>(instance)->stageSubmit(token,command,request,bytes):TONE3000_STAGE_INVALID;
++                },
++                [](void* instance,uint64_t token,char* result,uint32_t capacity)->int32_t {
++                    return instance?static_cast<LV2PluginInstance*>(instance)->stageRead(token,result,capacity):TONE3000_STAGE_INVALID;
++                }};
++            if(uri&&std::strcmp(uri,TONE3000_STAGE_URI)==0)return &stageBridge;
+             static const LV2_Feature features[] { { JUCE_TURTLE_RECALL_URI, &recallFeature },
+                                                   { LV2_STATE__interface,   &stateInterface } };
+ 
+--- a/tone3000/test/CMakeLists.txt
++++ b/tone3000/test/CMakeLists.txt
+@@ -14,6 +14,10 @@
+ enable_language(C)
+ 
+ juce_add_console_app(DspTests PRODUCT_NAME "DspTests")
++
++if(NOT MSVC)
++    set_source_files_properties(../plugin/src/Tone3000StageSession.cpp PROPERTIES COMPILE_OPTIONS "-fno-fast-math")
++endif()
+ 
+ target_sources(DspTests PRIVATE
+     src/auto_offset_tests.cpp
+@@ -56,6 +60,7 @@
+     ../plugin/src/PresetFile.cpp
+     ../plugin/src/PresetManager.cpp
+     ../plugin/src/Processor.cpp
++    ../plugin/src/Tone3000StageSession.cpp
+     ../plugin/src/ProcessorChain.cpp
+     ../plugin/src/ProcessorHistory.cpp
+     ../plugin/src/ProcessorModelLoader.cpp

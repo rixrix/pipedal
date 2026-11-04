@@ -980,6 +980,12 @@ private:
         uint8_t midiCommand = (uint8_t)(event.buffer[0] & 0xF0);
         if (midiCommand == 0xC0) // midi program change.
         {
+            // Passive opt-in observation precedes, and never replaces, normal recall.
+            // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BANK] [7.4]
+            if(listenForMidiProgramEvent && event.size==2 && event.buffer[1]<128){
+                MidiNotifyBody body(event.buffer[0],event.buffer[1],0);
+                realtimeWriter.OnMidiListen(body);
+            }
             this->deferredMidiMessageCount = 0; // we can discard previous control changes.
             midiProgramChangePending = true;
 
@@ -2211,6 +2217,9 @@ public:
 private:
     // virtual bool UpdatePluginStates(Pedalboard &pedalboard) override;
     virtual bool UpdatePluginState(PedalboardItem &pedalboardItem) override;
+    virtual bool CapturePluginState(uint64_t instanceId, Lv2PluginState* state) override;
+    int32_t SubmitTone3000Stage(uint64_t instanceId, uint64_t token, uint32_t command, const std::string& payload) override;
+    int32_t ReadTone3000Stage(uint64_t instanceId, uint64_t token, std::string& result) override;
 
     class RestartThread
     {
@@ -2269,7 +2278,7 @@ private:
         }
     };
 
-    bool restarting = false;
+    std::atomic<bool> restarting = false;
     std::vector<RestartThread *> restartThreads;
 
 public:
@@ -2342,6 +2351,19 @@ public:
         {
             result.cpuUsage_ = audioDriver->CpuUse();
         }
+        // Legacy active excludes silent fallback. Report the running engine
+        // separately and obtain device identity only from its actual driver.
+        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.2]
+        result.engineRunning_ = active.load() && !audioStopped.load();
+        if (*result.engineRunning_ && audioDriver)
+        {
+            auto actual = audioDriver->GetRuntimeInfo();
+            result.audioDriver_ = std::move(actual.driver);
+            result.actualInputDevice_ = std::move(actual.inputDevice);
+            result.actualOutputDevice_ = std::move(actual.outputDevice);
+            result.usingFallback_ = actual.usingFallback;
+            result.actualSampleRate_ = actual.sampleRate;
+        }
         GetCpuFrequency(&result.cpuFreqMin_, &result.cpuFreqMax_);
         result.hasCpuGovernor_ = HasCpuGovernor();
         if (result.hasCpuGovernor_)
@@ -2356,11 +2378,15 @@ public:
         return result;
     }
     std::atomic<bool> listenForMidiEvent = false;
+    std::atomic<bool> listenForMidiProgramEvent = false;
     std::atomic<bool> listenForAtomOutput = false;
 
     virtual void SetListenForMidiEvent(bool listen)
     {
         this->listenForMidiEvent = listen;
+    }
+    virtual void SetListenForMidiProgramEvent(bool listen) override {
+        this->listenForMidiProgramEvent=listen;
     }
     virtual void SetListenForAtomOutput(bool listen)
     {
@@ -2502,32 +2528,42 @@ void AudioHostImpl::OnNotifyPathPatchPropertyReceived(
     }
 }
 
-bool AudioHostImpl::UpdatePluginState(PedalboardItem &pedalboardItem)
+/** Explicit capture success, distinct from a state that has not changed.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12]
+ */
+bool AudioHostImpl::CapturePluginState(uint64_t instanceId,Lv2PluginState* state)
 {
-    IEffect *effect = currentPedalboard->GetEffect(pedalboardItem.instanceId());
-    if (effect != nullptr)
-    {
-        try
-        {
-            Lv2PluginState state;
-            if (!effect->GetLv2State(&state))
-            {
-                return false;
-            }
-            if (state != pedalboardItem.lv2State())
-            {
-                pedalboardItem.lv2State(state);
-                return true;
-            }
-            return false;
-        }
-        catch (const std::exception &e)
-        {
-            Lv2Log::warning(SS(pedalboardItem.pluginName() << ": " << e.what()));
-            return false;
-        }
-    }
-    return false;
+    if (!currentPedalboard || !state) return false;
+    IEffect* effect=currentPedalboard->GetEffect(instanceId);
+    if (!effect) return false;
+    try {return effect->GetLv2State(state);}
+    catch (const std::exception&) {return false;}
+}
+bool AudioHostImpl::UpdatePluginState(PedalboardItem& item)
+{
+    Lv2PluginState state;
+    if (!CapturePluginState(item.instanceId(),&state) || state==item.lv2State()) return false;
+    item.lv2State(state);return true;
+}
+
+/** Non-RT requests retain the current effect while invoking its declared extension.
+ * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5]
+ */
+int32_t AudioHostImpl::SubmitTone3000Stage(uint64_t instanceId, uint64_t token, uint32_t command, const std::string& payload)
+{
+    std::lock_guard guard(mutex);
+    if (!currentPedalboard) return -4;
+    auto effect = currentPedalboard->GetEffect(instanceId);
+    if (!effect || !effect->IsLv2Effect()) return -1;
+    return static_cast<Lv2Effect*>(effect)->SubmitTone3000Stage(token, command, payload);
+}
+int32_t AudioHostImpl::ReadTone3000Stage(uint64_t instanceId, uint64_t token, std::string& result)
+{
+    std::lock_guard guard(mutex);
+    if (!currentPedalboard) return -4;
+    auto effect = currentPedalboard->GetEffect(instanceId);
+    if (!effect || !effect->IsLv2Effect()) return -1;
+    return static_cast<Lv2Effect*>(effect)->ReadTone3000Stage(token, result);
 }
 
 void AudioHostImpl::OnWritePatchPropertyBuffer(
@@ -2553,4 +2589,10 @@ JSON_MAP_REFERENCE(JackHostStatus, cpuFreqMin)
 JSON_MAP_REFERENCE(JackHostStatus, cpuFreqMax)
 JSON_MAP_REFERENCE(JackHostStatus, hasCpuGovernor)
 JSON_MAP_REFERENCE(JackHostStatus, governor)
+JSON_MAP_REFERENCE(JackHostStatus, audioDriver)
+JSON_MAP_REFERENCE(JackHostStatus, actualInputDevice)
+JSON_MAP_REFERENCE(JackHostStatus, actualOutputDevice)
+JSON_MAP_REFERENCE(JackHostStatus, usingFallback)
+JSON_MAP_REFERENCE(JackHostStatus, engineRunning)
+JSON_MAP_REFERENCE(JackHostStatus, actualSampleRate)
 JSON_MAP_END()

@@ -28,6 +28,7 @@
 #include "AudioHost.hpp"
 #include "JackServerSettings.hpp"
 #include <functional>
+#include <optional>
 #include "PiPedalAlsa.hpp"
 #include "Promise.hpp"
 #include "json_variant.hpp"
@@ -192,8 +193,8 @@ namespace pipedal
     public:
         bool active_ = false;
         std::string errorMessage_;
-        bool restarting_;
-        uint64_t underruns_;
+        bool restarting_ = false;
+        uint64_t underruns_ = 0;
         float cpuUsage_ = 0;
         uint64_t msSinceLastUnderrun_ = 0;
         int32_t temperaturemC_ = -100000;
@@ -201,6 +202,12 @@ namespace pipedal
         uint64_t cpuFreqMin_ = 0;
         bool hasCpuGovernor_ = true;
         std::string governor_;
+        /** Additive actual-driver status; omitted/unknown is not a real device.
+         * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.2]
+         */
+        std::string audioDriver_, actualInputDevice_, actualOutputDevice_;
+        std::optional<bool> usingFallback_, engineRunning_;
+        std::optional<uint32_t> actualSampleRate_;
 
         DECLARE_JSON_MAP(JackHostStatus);
     };
@@ -222,10 +229,16 @@ namespace pipedal
         virtual void SetNotificationCallbacks(IAudioHostCallbacks *pNotifyCallbacks) = 0;
 
         virtual void SetListenForMidiEvent(bool listen) = 0;
+        virtual void SetListenForMidiProgramEvent(bool listen) = 0;
         virtual void SetListenForAtomOutput(bool listen) = 0;
 
         //virtual bool UpdatePluginStates(Pedalboard &pedalboard) = 0;
         virtual bool UpdatePluginState(PedalboardItem &pedalboardItem) = 0;
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-OPERATE] [3.12] */
+        virtual bool CapturePluginState(uint64_t instanceId, Lv2PluginState* state) = 0;
+        /** @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE-BRIDGE] [7.5] */
+        virtual int32_t SubmitTone3000Stage(uint64_t instanceId, uint64_t token, uint32_t command, const std::string& payload) = 0;
+        virtual int32_t ReadTone3000Stage(uint64_t instanceId, uint64_t token, std::string& result) = 0;
 
         virtual std::string AtomToJson(const LV2_Atom *atom) = 0;
 

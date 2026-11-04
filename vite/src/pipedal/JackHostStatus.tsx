@@ -78,6 +78,13 @@ export default class JackHostStatus {
         this.cpuFreqMin = input.cpuFreqMin;
         this.hasCpuGovernor = input.hasCpuGovernor;
         this.governor = input.governor;
+        this.audioDriver = typeof input.audioDriver === "string" ? input.audioDriver : undefined;
+        this.actualInputDevice = typeof input.actualInputDevice === "string" ? input.actualInputDevice : undefined;
+        this.actualOutputDevice = typeof input.actualOutputDevice === "string" ? input.actualOutputDevice : undefined;
+        this.usingFallback = typeof input.usingFallback === "boolean" ? input.usingFallback : undefined;
+        this.engineRunning = typeof input.engineRunning === "boolean" ? input.engineRunning : undefined;
+        this.actualSampleRate = typeof input.actualSampleRate === "number" && Number.isFinite(input.actualSampleRate)
+            && input.actualSampleRate > 0 ? input.actualSampleRate : undefined;
         return this;
     }
     hasTemperature(): boolean {
@@ -94,6 +101,15 @@ export default class JackHostStatus {
     cpuFreqMin: number = 0;
     hasCpuGovernor: boolean = false;
     governor: string = "";
+    /** Running driver data is optional for compatibility with older servers.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.2]
+     */
+    audioDriver?: string;
+    actualInputDevice?: string;
+    actualOutputDevice?: string;
+    usingFallback?: boolean;
+    engineRunning?: boolean;
+    actualSampleRate?: number;
 
     static getCpuInfo(label: string, status?: JackHostStatus): React.ReactNode {
         if (!status) {

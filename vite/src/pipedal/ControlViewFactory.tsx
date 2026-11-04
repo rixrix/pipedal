@@ -34,6 +34,7 @@ import ToobSpectrumAnalyzerViewFactory from './ToobSpectrumAnalyzerView';
 import ToobMLViewFactory from './ToobMLView';
 import ToobPlayerFactory from './ToobPlayerView';
 import ToobNamViewFactory from './ToobNamView';
+import Tone3000ViewFactory from './Tone3000View';
 import ToobParametericEqViewFactory from './ToobParametricEqView';
 import {ToobParametricEqViewFactoryStereo} from './ToobParametricEqView';
 
@@ -46,6 +47,8 @@ let pluginFactories: IControlViewFactory[] = [
     new ToobMLViewFactory(),
     new ToobPlayerFactory(),
     new ToobNamViewFactory(),
+    // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-4] [DES-UI] [2.10]
+    new Tone3000ViewFactory(),
     new ToobParametericEqViewFactory(),
     new ToobParametricEqViewFactoryStereo(),
 ];
@@ -101,4 +104,3 @@ export function GetControlView(
         }
     }
 }
-

@@ -21,6 +21,15 @@ add_custom_command(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/vite
 
     DEPENDS
+    src/pipedal/Tone3000MixMatch.ts
+    src/pipedal/Tone3000MixMatchDialog.tsx
+    src/pipedal/Tone3000Performance.ts
+    src/pipedal/Tone3000PerformanceDialog.tsx
+    src/pipedal/Tone3000Bundle.ts
+    src/pipedal/Tone3000BundleDialog.tsx
+    src/pipedal/Tone3000Stage.ts
+    src/pipedal/Tone3000CoupledControls.ts
+    src/pipedal/Tone3000SoundcheckPanel.tsx
         # find public src *.json *.ts  -type f >/tmp/tmp.txt                    
     public/css/modGui.css
     public/css/roboto.css
@@ -204,6 +213,46 @@ add_custom_command(
     src/pipedal/ToobPowerStage2View.tsx
     src/pipedal/ToobWarmerView.tsx
     src/pipedal/ControlViewFactory.tsx
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-UI] [2.10]
+    src/pipedal/Tone3000View.tsx
+    src/pipedal/Tone3000BlockFocus.ts
+    src/pipedal/Tone3000PedalboardView.tsx
+    src/pipedal/Tone3000ChainView.tsx
+    src/pipedal/Tone3000ChainProjection.ts
+    src/pipedal/Tone3000Rig.ts
+    src/pipedal/Tone3000RigPanel.tsx
+    src/pipedal/Tone3000ControlLayout.ts
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [7.13] [7.14]
+    src/pipedal/Tone3000Gear.ts
+    src/pipedal/Tone3000MobileLayout.ts
+    public/TONE3000-GEAR-LICENSE.txt
+    src/pipedal/svg/tone3000/LICENSE
+    src/pipedal/svg/tone3000/t3k-avatar.png
+    src/pipedal/svg/tone3000/amp-cab.svg
+    src/pipedal/svg/tone3000/amp.svg
+    src/pipedal/svg/tone3000/cab.svg
+    src/pipedal/svg/tone3000/experimental.svg
+    src/pipedal/svg/tone3000/file.svg
+    src/pipedal/svg/tone3000/ir.svg
+    src/pipedal/svg/tone3000/outboard.svg
+    src/pipedal/svg/tone3000/pedal.svg
+    src/pipedal/svg/tone3000/space.svg
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.3]
+    src/pipedal/Tone3000ControlUnits.ts
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOUR-REFINEMENTS] [7.28] [7.29]
+    src/pipedal/Tone3000TouchEditor.tsx
+    src/pipedal/Tone3000TouchMath.ts
+    src/pipedal/Tone3000TouchSettings.ts
+    src/pipedal/Tone3000EditState.ts
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.10]
+    src/pipedal/Tone3000Library.ts
+    src/pipedal/Tone3000LibraryDialog.tsx
+    # @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-STAGE] [7.1] [7.2]
+    src/pipedal/Tone3000PresetPreviewDialog.tsx
+    src/pipedal/Tone3000PreviewReader.ts
+    src/pipedal/StageStatus.ts
+    src/pipedal/StageStatusView.tsx
+    src/pipedal/PatchPropertyControl.tsx
     src/pipedal/App.tsx
     src/pipedal/Rectangle.tsx
     src/pipedal/Rect.tsx

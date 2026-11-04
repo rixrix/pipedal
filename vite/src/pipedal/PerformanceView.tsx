@@ -41,7 +41,7 @@ import { isDarkMode } from './DarkMode';
 import { BankIndex } from './Banks';
 import SnapshotEditor from './SnapshotEditor';
 import { Snapshot } from './Pedalboard';
-import JackStatusView from './JackStatusView';
+import StageStatusView from './StageStatusView';
 import { IDialogStackable, popDialogStack, pushDialogStack } from './DialogStack';
 import { css } from '@emotion/react';
 
@@ -196,7 +196,7 @@ export const PerformanceView =
                 this.model.presetChanged.removeOnChangedHandler(this.onPresetChangedChanged)
                 this.model.presets.removeOnChangedHandler(this.onPresetsChanged);
                 this.model.banks.removeOnChangedHandler(this.onBanksChanged);
-                this.model.banks.removeOnChangedHandler(this.showStatusMonitorHandler);
+                this.model.showStatusMonitor.removeOnChangedHandler(this.showStatusMonitorHandler);
 
 
                 this.mounted = false;
@@ -518,13 +518,13 @@ export const PerformanceView =
 
                                 )}
                             </div >
-                            <div style={{ flex: "1 0 auto", display: "flex", marginTop: 16, marginBottom: 20 }}>
+                            <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", display: "flex", marginTop: 16, marginBottom: 4 }}>
                                 <SnapshotPanel onEdit={(index) => { return this.handleOnEdit(index); }} />
                             </div>
 
 
-                            {!this.state.showSnapshotEditor && this.state.showStatusMonitor && (
-                                <JackStatusView />
+                            {!this.state.showSnapshotEditor && this.props.open && (
+                                <StageStatusView active={this.props.open} showMetrics={this.state.showStatusMonitor} />
                             )}
                         </div>
                         {this.state.showSnapshotEditor && (
@@ -544,4 +544,3 @@ export const PerformanceView =
         },
         styles
     );
-

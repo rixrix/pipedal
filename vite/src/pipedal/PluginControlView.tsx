@@ -33,7 +33,8 @@ import ModGuiHost from './ModGuiHost';
 import { midiChannelBindingControlFeatureEnabled } from './MidiChannelBinding';
 
 import { withStyles } from "tss-react/mui";
-import { PiPedalModel, PiPedalModelFactory } from './PiPedalModel';
+import { PiPedalModel, PiPedalModelFactory, State } from './PiPedalModel';
+import { tone3000PitchPlugin } from './Tone3000TouchSettings';
 import { UiPlugin, UiControl, UiFileProperty, UiFrequencyPlot, ScalePoint } from './Lv2Plugin';
 import {
     Pedalboard, PedalboardItem, ControlValue
@@ -526,6 +527,12 @@ const PluginControlView =
                         onPreviewChange={(value: number) => { this.onPreviewChange(controlValue!.key, value) }}
                         requestIMEEdit={(uiControl: any, value: any) => this.requestImeEdit(uiControl, value)}
                         options={options}
+                        // Standalone T3K Pitch uses the same keyboard-free numeric editor.
+                        // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [FR-27] [DES-PITCH-LV2] [7.36]
+                        touchEdit={tone3000PitchPlugin(this.props.item?.uri)
+                            && ["semitones", "tonality"].includes(uiControl.symbol)
+                            ? { step: uiControl.symbol === "semitones" ? (this.props.item?.controlValues.find(value => value.key === "step")?.value === 1 ? 1 : .1) : 1,
+                                live: true, ready: this.model.state.get() === State.Ready } : undefined}
 
                     />
                 ));
@@ -1045,9 +1052,11 @@ const PluginControlView =
                 if (pedalboardItem.midiChannelBinding && midiChannelBindingControlFeatureEnabled) {
                     nodes.push(this.midiBindingControl(pedalboardItem));
                 }
+                // T3K-only wrapper hooks release fixed heights in the short-screen parent scroll layout.
+                // @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-FOLD-GEAR] [7.14]
                 return (
-                    <div className={scrollClass}>
-                        <div className={gridClass}  >
+                    <div className={scrollClass + (pedalboardItem.uri === "https://www.tone3000.com/plugin" ? " t3k-plugin-scroll" : "")}>
+                        <div className={gridClass + (pedalboardItem.uri === "https://www.tone3000.com/plugin" ? " t3k-plugin-grid" : "")} >
                             {
                                 nodes
                             }
@@ -1088,7 +1097,7 @@ const PluginControlView =
 
 
                 return (
-                    <div className={frameClass}>
+                    <div className={frameClass + (pedalboardItem.uri === "https://www.tone3000.com/plugin" ? " t3k-plugin-frame" : "")}>
                         <div className={classes.vuMeterL}>
                             <VuMeter displayText={true} display="input" instanceId={pedalboardItem.instanceId} />
                         </div>

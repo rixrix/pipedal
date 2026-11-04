@@ -1,0 +1,117 @@
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │  AFX Configuration                                                      │
+# │                                                                         │
+# │  Defaults are in .afx/.afx.yaml (managed by AFX — do not edit).         │
+# │  Add overrides below — they take precedence over defaults.              │
+# │                                                                         │
+# │  Docs: https://github.com/AgenticFlowX/afx/blob/main/docs/agenticflowx/ │
+# │  Help: /afx-help (Claude) or afx-help (Codex)                           │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+# AFX version — controls which branch/tag afx-cli fetches from.
+# Accepts: semver (e.g. '1.5.3' → tag v1.5.3), branch name, or 'main'.
+version: main
+
+# ── Agent Selection ────────────────────────────────────────────────────
+# Which AI agents are enabled. Managed by afx-cli during install/update.
+agents:
+  claude: true
+  agents: true
+
+# ── Installed Packs & Skills ─────────────────────────────────────────────
+# Managed by afx-cli. Add packs with:
+#   ./afx-cli install afx-pack-qa
+#   ./afx-cli install afx-pack-security
+
+skills:
+  - name: afx-spec
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-design
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-task
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-sprint
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-dash
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-dev
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-check
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-report
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-session
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-context
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-next
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-scaffold
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-adr
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-discover
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-research
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-hello
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-help
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+  - name: afx-release
+    category: agenticflowx
+    source: afx-pack-agenticflowx
+    item_type: afx
+packs:
+
+  - name: afx-pack-starter
+    installed_ref: main
+    installed_at: 2026-10-03T23:51:34.000Z
+  - name: afx-pack-agenticflowx
+    installed_ref: main
+    installed_at: 2026-10-03T23:51:36.000Z
+# ── Your Overrides ───────────────────────────────────────────────────────
+# Override any value from .afx/.afx.yaml here. Examples:
+#
+#   paths:
+#     specs: my-specs          # Custom spec directory
+#
+#   features:
+#     - user-auth              # Active features
+#
+#   quality_gates:
+#     require_path_check: false

@@ -38,7 +38,13 @@ public:
 };
 
 class HttpResponse {
+    unsigned statusCode_ = 200;
 public:
+    /** Custom upload errors; existing routes retain their default success status.
+     * @see docs/specs/tone3000-gig-rig/tone3000-gig-rig.md [DES-LIBRARY] [3.9]
+     */
+    void setStatus(unsigned status) { statusCode_=status; }
+    unsigned status() const { return statusCode_; }
     virtual void set(const std::string&key, const std::string&value) = 0;
     virtual void setContentLength(size_t size) = 0;
     virtual void setBody(const std::string&body) = 0;
